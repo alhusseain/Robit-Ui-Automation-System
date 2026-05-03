@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using Fleck;
 using Newtonsoft.Json;
 using System.Drawing;
+using FlaUI.Core.AutomationElements;
 
 static class Program
 {
@@ -96,7 +97,7 @@ static class Program
         Console.WriteLine("WebSocket server running on ws://localhost:8181");
     }
 
-    static void SmartInvoke(dynamic el, dynamic rect)
+    static void SmartInvoke(AutomationElement el, Rectangle rect)
     {
         try
         {
