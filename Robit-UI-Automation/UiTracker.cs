@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Drawing;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using System.Windows.Forms;
 
 using FlaUI.Core.AutomationElements;
@@ -11,45 +13,70 @@ using FlaUI.UIA3;
 internal class UiTracker
 {
     private UIA3Automation _automation;
-    private List<CachedElement> _elements = new List<CachedElement>();
+    private volatile List<CachedElement> _elements = new List<CachedElement>();
     private OverlayForm _overlay;
+    private volatile bool _isRefreshing = false;
 
     public UiTracker()
     {
         _automation = new UIA3Automation();
+
+        _automation.RegisterFocusChangedEvent(el => TriggerRefresh());
+
+
+        Task.Run(async () =>
+        {
+            while (true)
+            {
+                TriggerRefresh();
+                await Task.Delay(2000); // Adjust polling rate as needed
+            }
+        });
     }
 
     public void SafeRefresh()
     {
-        if (_overlay != null)
-            _overlay.Hide();
+        TriggerRefresh();
+    }
 
-        RefreshInternal();
-
-        if (_overlay != null)
+    private void TriggerRefresh()
+    {
+        if (_isRefreshing) return;
+        
+        Task.Run(() => 
         {
-            // _overlay.SetRects(_elements.Select(e => (e.Rect,).ToList());
-            _overlay.Show();
-        }
+            try
+            {
+                _isRefreshing = true;
+                RefreshInternal();
+            }
+            finally
+            {
+                _isRefreshing = false;
+            }
+        });
     }
 
     private void RefreshInternal()
     {
-        _elements.Clear();
-
+        try
+        {
         var desktop = _automation.GetDesktop();
 
         var windows = desktop.FindAllChildren()
             .Where(w => !w.Properties.IsOffscreen.ValueOrDefault)
             .ToList();
 
-        foreach (var win in windows)
+            var newElements = new ConcurrentBag<CachedElement>();
+
+            // 🔥 3. Parallelism: Scrape multiple windows simultaneously
+            Parallel.ForEach(windows, win =>
         {
             try
             {
                 var winRect = win.BoundingRectangle;
                 if (winRect.IsEmpty || winRect.Width <= 0 || winRect.Height <= 0)
-                    continue;
+                        return; // return replaces continue in Parallel.ForEach
 
                 var elements = win.FindAllDescendants(cf => 
                     cf.ByControlType(ControlType.Button)
@@ -76,7 +103,7 @@ internal class UiTracker
                         if (el.Properties.IsOffscreen.ValueOrDefault)
                             continue;
 
-                        _elements.Add(new CachedElement
+                            newElements.Add(new CachedElement
                         {
                             Element = el,
                             Rect = rect
@@ -86,9 +113,15 @@ internal class UiTracker
                 }
             }
             catch { }
-        }
+            });
 
+            _elements = newElements.ToList(); // Atomically swap in the new list to ensure thread safety
         Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Refresh failed: {ex.Message}");
+        }
     }
 
     private bool IsActuallyVisible(AutomationElement el)

@@ -56,7 +56,7 @@ static class Program
                 {
                     overlay.Invoke((Action)(() =>
                     {
-                        tracker.SafeRefresh();
+                        // tracker.SafeRefresh();
 
                         var closest = tracker.GetClosest6().ToList();
                         lastClosest = closest;
