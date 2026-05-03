@@ -28,7 +28,7 @@ internal class UiTracker
 
         if (_overlay != null)
         {
-            _overlay.SetRects(_elements.Select(e => e.Rect).ToList());
+            // _overlay.SetRects(_elements.Select(e => (e.Rect,).ToList());
             _overlay.Show();
         }
     }

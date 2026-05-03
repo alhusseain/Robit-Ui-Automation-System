@@ -52,6 +52,14 @@
               "target": "Package",
               "version": "[5.0.0, )"
             },
+            "Fleck": {
+              "target": "Package",
+              "version": "[1.2.0, )"
+            },
+            "Microsoft.CSharp": {
+              "target": "Package",
+              "version": "[4.7.0, )"
+            },
             "Microsoft.NETFramework.ReferenceAssemblies": {
               "suppressParent": "All",
               "target": "Package",
@@ -61,6 +69,10 @@
             "MouseKeyHook": {
               "target": "Package",
               "version": "[5.7.1, )"
+            },
+            "Newtonsoft.Json": {
+              "target": "Package",
+              "version": "[13.0.4, )"
             }
           },
           "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.201\\RuntimeIdentifierGraph.json"

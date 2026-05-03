@@ -1,13 +1,20 @@
 ﻿using System;
 using System.Linq;
 using System.Windows.Forms;
-using Gma.System.MouseKeyHook;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using Fleck;
+using Newtonsoft.Json;
+using System.Drawing;
 
 static class Program
 {
     static UiTracker tracker;
     static OverlayForm overlay;
-    static IKeyboardMouseEvents hook;
+    static WebSocketServer server;
+
+    static List<CachedElement> lastClosest = new List<CachedElement>();
 
     [STAThread]
     static void Main()
@@ -19,34 +26,121 @@ static class Program
         overlay = new OverlayForm();
 
         tracker.AttachOverlay(overlay);
-
         overlay.Show();
 
-        hook = Hook.GlobalEvents();
-
-        hook.MouseDownExt += (s, e) =>
-        {
-            if (e.Button != MouseButtons.Left)
-                return;
-
-            // 🔥 STEP 1: rebuild UI snapshot (no timer anymore)
-            tracker.SafeRefresh();
-
-            // 🔥 STEP 2: get closest 6 to mouse
-            var closest = tracker.GetClosest6();
-
-            Console.WriteLine("\n--- Closest 6 Elements ---");
-
-            // foreach (var el in closest)
-            // {
-            //     var name = el.Element.Properties.Name.ValueOrDefault ?? "[No Name]";
-            //     Console.WriteLine(name + " | " + el.Element.ControlType);
-            // }
-
-            // 🔥 STEP 3: highlight ONLY those 6
-            overlay.SetRects(closest.Select(c => c.Rect).ToList());
-        };
+        Task.Run(StartWebSocketServer);
 
         Application.Run();
+    }
+
+    static void StartWebSocketServer()
+    {
+        FleckLog.Level = LogLevel.Warn;
+        tracker.SafeRefresh();
+        server = new WebSocketServer("ws://0.0.0.0:8181");
+
+        server.Start(socket =>
+        {
+            socket.OnOpen = () => Console.WriteLine("Unity connected");
+            socket.OnClose = () => Console.WriteLine("Unity disconnected");
+
+            socket.OnMessage = message =>
+            {
+                Console.WriteLine("Received: " + message);
+
+                dynamic msg = JsonConvert.DeserializeObject(message);
+                string type = msg.type;
+
+                if (type == "getClosest")
+                {
+                    overlay.Invoke((Action)(() =>
+                    {
+                        tracker.SafeRefresh();
+
+                        var closest = tracker.GetClosest6().ToList();
+                        lastClosest = closest;
+                        Console.WriteLine(closest.Count);
+
+                        Console.WriteLine("\n--- Closest Elements ---");
+                        for (int i = 0; i < closest.Count; i++)
+                        {
+                            var el = closest[i].Element;
+                            var name = el.Properties.Name.ValueOrDefault ?? "[No Name]";
+                            Console.WriteLine($"{i}: {name}");
+                        }
+
+                        overlay.SetRects(
+                            closest.Select((c, i) => (c.Rect, i)).ToList()
+                        );
+                    }));
+                }
+                else if (type == "invokeIndex")
+                {
+                    int index = (int)msg.index;
+
+                    overlay.Invoke((Action)(() =>
+                    {
+                        if (index < 0 || index >= lastClosest.Count)
+                        {
+                            Console.WriteLine("Invalid index");
+                            return;
+                        }
+
+                        var item = lastClosest[index];
+                        SmartInvoke(item.Element, item.Rect);
+                    }));
+                }
+            };
+        });
+
+        Console.WriteLine("WebSocket server running on ws://localhost:8181");
+    }
+
+    static void SmartInvoke(dynamic el, dynamic rect)
+    {
+        try
+        {
+            if (el.Patterns.Invoke.IsSupported)
+            {
+                el.Patterns.Invoke.Pattern.Invoke();
+                return;
+            }
+
+            if (el.Patterns.SelectionItem.IsSupported)
+            {
+                el.Patterns.SelectionItem.Pattern.Select();
+                SendKeys.SendWait("{ENTER}");
+                return;
+            }
+
+            int x = rect.Left + rect.Width / 2;
+            int y = rect.Top + rect.Height / 2;
+
+            DoubleClickAt(x, y);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Invoke failed: " + ex.Message);
+        }
+    }
+
+    [DllImport("user32.dll")]
+    static extern bool SetCursorPos(int X, int Y);
+
+    [DllImport("user32.dll")]
+    static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    const uint LEFTDOWN = 0x02;
+    const uint LEFTUP = 0x04;
+
+    static void DoubleClickAt(int x, int y)
+    {
+        SetCursorPos(x, y);
+
+        for (int i = 0; i < 2; i++)
+        {
+            mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+            mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        }
     }
 }

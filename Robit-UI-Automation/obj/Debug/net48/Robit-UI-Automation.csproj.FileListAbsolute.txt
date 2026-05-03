@@ -14,3 +14,5 @@ D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI.8825B778.Up2Date
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI-Automation.exe
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI-Automation.pdb
+D:\Projects\Robit Ui Automation System\Robit-UI-Automation\bin\Debug\net48\Fleck.dll
+D:\Projects\Robit Ui Automation System\Robit-UI-Automation\bin\Debug\net48\Newtonsoft.Json.dll
