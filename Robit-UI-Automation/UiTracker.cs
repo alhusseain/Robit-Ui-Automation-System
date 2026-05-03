@@ -19,18 +19,13 @@ internal class UiTracker
         _automation = new UIA3Automation();
     }
 
-    // ============================
-    // SAFE REFRESH PIPELINE
-    // ============================
     public void SafeRefresh()
     {
-        // 1. REMOVE OVERLAY (critical)
         if (_overlay != null)
             _overlay.Hide();
 
         RefreshInternal();
 
-        // 2. RENDER OVERLAY AFTER SCAN
         if (_overlay != null)
         {
             _overlay.SetRects(_elements.Select(e => e.Rect).ToList());
@@ -38,9 +33,6 @@ internal class UiTracker
         }
     }
 
-    // ============================
-    // UIA SCAN (NO OVERLAY HERE)
-    // ============================
     private void RefreshInternal()
     {
         _elements.Clear();
@@ -51,39 +43,37 @@ internal class UiTracker
             .Where(w => !w.Properties.IsOffscreen.ValueOrDefault)
             .ToList();
 
-        var occludingRects = new List<Rectangle>();
-
         foreach (var win in windows)
         {
             try
             {
                 var winRect = win.BoundingRectangle;
-                if (winRect.IsEmpty)
+                if (winRect.IsEmpty || winRect.Width <= 0 || winRect.Height <= 0)
                     continue;
 
-                var blockers = occludingRects.ToList();
-                occludingRects.Add(winRect);
-
-                var elements = win.FindAllDescendants(cf =>
+                var elements = win.FindAllDescendants(cf => 
                     cf.ByControlType(ControlType.Button)
+                    .Or(cf.ByControlType(ControlType.CheckBox))
+                    .Or(cf.ByControlType(ControlType.ComboBox))
                     .Or(cf.ByControlType(ControlType.Edit))
+                    .Or(cf.ByControlType(ControlType.Hyperlink))
                     .Or(cf.ByControlType(ControlType.ListItem))
                     .Or(cf.ByControlType(ControlType.MenuItem))
+                    .Or(cf.ByControlType(ControlType.RadioButton))
+                    .Or(cf.ByControlType(ControlType.Slider))
+                    .Or(cf.ByControlType(ControlType.TabItem))
+                    .Or(cf.ByControlType(ControlType.TreeItem))
                 );
 
                 foreach (var el in elements)
                 {
                     try
                     {
-                        if (el.Properties.IsOffscreen.ValueOrDefault)
-                            continue;
-
                         var rect = el.BoundingRectangle;
-                        if (rect.IsEmpty)
+                        if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
                             continue;
 
-                        // light occlusion check (safe version)
-                        if (IsFullyCovered(rect, blockers))
+                        if (el.Properties.IsOffscreen.ValueOrDefault)
                             continue;
 
                         _elements.Add(new CachedElement
@@ -92,43 +82,62 @@ internal class UiTracker
                             Rect = rect
                         });
                     }
-                    catch
-                    {
-                        // ignore stale elements
-                    }
+                    catch { }
                 }
             }
-            catch
-            {
-                // ignore broken windows
-            }
+            catch { }
         }
 
-        Console.WriteLine($"Cached {_elements.Count} visible elements");
+        Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
     }
 
-    // ============================
-    // OCCLUSION CHECK (SAFE)
-    // ============================
-    private bool IsFullyCovered(Rectangle target, List<Rectangle> blockers)
+    private bool IsActuallyVisible(AutomationElement el)
     {
-        foreach (var b in blockers)
+        try
         {
-            if (b.Contains(target))
-                return true;
+            var r = el.BoundingRectangle;
+
+            var points = new[]
+            {
+                new Point(r.Left + r.Width / 2, r.Top + r.Height / 2),
+                new Point(r.Left + 2, r.Top + 2),
+                new Point(r.Right - 2, r.Bottom - 2)
+            };
+
+            foreach (var p in points)
+            {
+                var top = _automation.FromPoint(p);
+
+                if (top == null)
+                    continue;
+
+                var current = top;
+                while (current != null)
+                {
+                    // If the sampled pixel belongs to the element OR any child inside of it
+                    if (current.Equals(el))
+                        return true;
+
+                    current = current.Parent;
+                }
+            }
+
+            return false;
         }
-        return false;
+        catch
+        {
+            return false;
+        }
     }
 
-    // ============================
-    // CLOSEST 6 TO MOUSE
-    // ============================
     public List<CachedElement> GetClosest6()
     {
         var mouse = Cursor.Position;
 
         return _elements
             .OrderBy(e => DistanceToRect(mouse, e.Rect))
+            .ThenBy(e => e.Rect.Width * e.Rect.Height) // 3. Fallback size-sort allows innermost items to top the list when overlaps happen
+            .Where(e => IsActuallyVisible(e.Element)) // 🔥 Lazy evaluation: only hit-tests the closest items!
             .Take(6)
             .ToList();
     }

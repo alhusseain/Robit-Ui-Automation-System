@@ -37,10 +37,11 @@ static class Program
 
             Console.WriteLine("\n--- Closest 6 Elements ---");
 
-            foreach (var el in closest)
-            {
-                Console.WriteLine(el.Element.Name + " | " + el.Element.ControlType);
-            }
+            // foreach (var el in closest)
+            // {
+            //     var name = el.Element.Properties.Name.ValueOrDefault ?? "[No Name]";
+            //     Console.WriteLine(name + " | " + el.Element.ControlType);
+            // }
 
             // 🔥 STEP 3: highlight ONLY those 6
             overlay.SetRects(closest.Select(c => c.Rect).ToList());
