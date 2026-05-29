@@ -4,26 +4,21 @@ using System.Linq;
 
 public class CustomMetrics
 {
-    private readonly String moduleName;
+    private readonly string metricName;
     private readonly List<long> timingsMs;
 
     private readonly object timingsLock;
 
-    public CustomMetrics(String moduleName)
+    public CustomMetrics(string metricName)
     {
-        this.moduleName = moduleName;
+        this.metricName = metricName;
         timingsLock = new object();
         timingsMs = new List<long>();
 
     }
 
-    public void RecordTiming(long elapsedMs)
+    public void RecordTiming(long elapsedMs, string details = null)
     {
-        // if (!settings.MeasureGetClosest)
-        // {
-        //     return;
-        // }
-
         lock (timingsLock)
         {
             timingsMs.Add(elapsedMs);
@@ -38,11 +33,9 @@ public class CustomMetrics
             double avg = timingsMs.Average();
 
             Console.WriteLine(
-                $"GetClosest: {elapsedMs} ms | avg {avg:F1} ms | min {min} ms | max {max} ms | samples {timingsMs.Count}"
+                $"{metricName}: {elapsedMs} ms | avg {avg:F1} ms | min {min} ms | max {max} ms | samples {timingsMs.Count}" +
+                (string.IsNullOrWhiteSpace(details) ? string.Empty : $" | {details}")
             );
         }
     }
-
-
-
 }

@@ -31,7 +31,7 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
-        tracker = new UiTracker();
+        tracker = new UiTracker(settings.MeasureRefresh, settings.MeasureVisibility);
         overlay = new OverlayForm();
 
         tracker.AttachOverlay(overlay);
@@ -41,6 +41,8 @@ static class Program
 
         Console.WriteLine($"Input mode: {settings.InputMode}");
         Console.WriteLine($"GetClosest timing enabled: {settings.MeasureGetClosest}");
+        Console.WriteLine($"Refresh tracing enabled: {settings.MeasureRefresh}");
+        Console.WriteLine($"Visibility tracing enabled: {settings.MeasureVisibility}");
 
         if (settings.InputMode == "test")
         {
@@ -145,7 +147,10 @@ static class Program
         var closest = tracker.GetClosest6().ToList();
         sw.Stop();
 
-        getClosestMetrics.RecordTiming(sw.ElapsedMilliseconds);
+        if (settings.MeasureGetClosest)
+        {
+            getClosestMetrics.RecordTiming(sw.ElapsedMilliseconds);
+        }
 
         lastClosest = closest;
 
@@ -302,6 +307,8 @@ static class Program
     {
         public string InputMode { get; private set; } = "io";
         public bool MeasureGetClosest { get; private set; } = true;
+        public bool MeasureRefresh { get; private set; } = true;
+        public bool MeasureVisibility { get; private set; } = true;
 
         public static AppSettings Load()
         {
@@ -309,7 +316,9 @@ static class Program
             return new AppSettings
             {
                 InputMode = NormalizeMode(GetValue(values, "INPUT_MODE", "io")),
-                MeasureGetClosest = ParseBool(GetValue(values, "MEASURE_GET_CLOSEST", "true"))
+                MeasureGetClosest = ParseBool(GetValue(values, "MEASURE_GET_CLOSEST", "true")),
+                MeasureRefresh = ParseBool(GetValue(values, "MEASURE_REFRESH", "true")),
+                MeasureVisibility = ParseBool(GetValue(values, "MEASURE_VISIBILITY", "true"))
             };
         }
 
