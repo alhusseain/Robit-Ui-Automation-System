@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Robit-UI-Automation")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+a0332718027c89fa4fa7396d26b4cc0a8692851f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3990585d515a119f7b7a9349f4294eed06c7a577")]
 [assembly: System.Reflection.AssemblyProductAttribute("Robit-UI-Automation")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Robit-UI-Automation")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

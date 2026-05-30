@@ -1,10 +1,25 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 public class OverlayForm : Form
 {
+    private const int WS_EX_LAYERED = 0x80000;
+    private const int WS_EX_TRANSPARENT = 0x20;
+    private const int WS_EX_NOACTIVATE = 0x08000000;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+
+    private static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    private const int SWP_NOSIZE = 0x0001;
+    private const int SWP_NOMOVE = 0x0002;
+    private const int SWP_NOACTIVATE = 0x0010;
+    private const int SWP_SHOWWINDOW = 0x0040;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
     public List<(Rectangle Rect, int Index)> Rects = new List<(Rectangle Rect, int Index)>();
 
     public OverlayForm()
@@ -30,11 +45,13 @@ public class OverlayForm : Form
 
             Native.SetWindowLong(this.Handle, -20,
                 exStyle |
-                0x80000 | // WS_EX_LAYERED
-                0x20      // WS_EX_TRANSPARENT (click-through)
+                WS_EX_LAYERED |
+                WS_EX_TRANSPARENT |
+                WS_EX_NOACTIVATE |
+                WS_EX_TOOLWINDOW
             );
 
-            // 🔥 force initial clean paint
+            EnsureTopMost();
             this.Invalidate();
             this.Update();
         };
@@ -43,7 +60,17 @@ public class OverlayForm : Form
     public void SetRects(List<(Rectangle Rect, int Index)> rects)
     {
         Rects = rects;
+        EnsureTopMost();
         Invalidate();
+    }
+
+    private void EnsureTopMost()
+    {
+        if (IsHandleCreated)
+        {
+            SetWindowPos(this.Handle, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
     }
 
     protected override void OnPaint(PaintEventArgs e)
