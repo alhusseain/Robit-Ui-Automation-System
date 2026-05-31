@@ -155,28 +155,28 @@ static class Program
         lastClosest = closest;
 
         // Keep existing console output for debugging; Unity can ignore it or log it
-        // Console.WriteLine(closest.Count);
-        // Console.WriteLine("\n--- Closest Elements ---");
+        Console.WriteLine(closest.Count);
+        Console.WriteLine("\n--- Closest Elements ---");
 
-        // for (int i = 0; i < closest.Count; i++)
-        // {
-        //     var el = closest[i].Element;
-        //     var name = el.Properties.Name.ValueOrDefault ?? "[No Name]";
-        //     Console.WriteLine($"{i + 1}: {name}");
-        // }
+        for (int i = 0; i < closest.Count; i++)
+        {
+            var el = closest[i].Element;
+            var name = el.Properties.Name.ValueOrDefault ?? "[No Name]";
+            Console.WriteLine($"{i + 1}: {name}");
+        }
 
         // Write structured output for Unity so it knows the elements
         // (Just as it used to over WebSocket)
-        // var msgObj = new {
-        //     type = "closestElements",
-        //     elements = closest.Select(c => new {
-        //         x = c.Rect.X,
-        //         y = c.Rect.Y,
-        //         width = c.Rect.Width,
-        //         height = c.Rect.Height
-        //     }).ToArray()
-        // };
-        // Console.WriteLine("CMD_RESPONSE:" + JsonConvert.SerializeObject(msgObj));
+        var msgObj = new {
+            type = "closestElements",
+            elements = closest.Select(c => new {
+                x = c.Rect.X,
+                y = c.Rect.Y,
+                width = c.Rect.Width,
+                height = c.Rect.Height
+            }).ToArray()
+        };
+        Console.WriteLine("CMD_RESPONSE:" + JsonConvert.SerializeObject(msgObj));
         overlay.SetRects(
             closest.Select((c, i) => (c.Rect, i + 1)).ToList()
         );
@@ -259,28 +259,118 @@ static class Program
     {
         try
         {
-            if (el.Patterns.Invoke.IsSupported)
+            if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
             {
-                el.Patterns.Invoke.Pattern.Invoke();
+                var bounding = el.Properties.BoundingRectangle.ValueOrDefault;
+                if (!bounding.IsEmpty)
+                {
+                    rect = bounding;
+                }
+            }
+
+            if (TryInvokePattern(el))
+            {
                 return;
             }
 
-            if (el.Patterns.SelectionItem.IsSupported)
+            if (TrySelectionPattern(el))
             {
-                el.Patterns.SelectionItem.Pattern.Select();
-                SendKeys.SendWait("{ENTER}");
+                return;
+            }
+
+            if (TryTogglePattern(el))
+            {
+                return;
+            }
+
+            if (TryExpandCollapsePattern(el))
+            {
+                return;
+            }
+
+            if (TryLegacyDefaultAction(el))
+            {
                 return;
             }
 
             int x = rect.Left + rect.Width / 2;
             int y = rect.Top + rect.Height / 2;
-
-            DoubleClickAt(x, y);
+            ClickAt(x, y);
         }
         catch (Exception ex)
         {
             Console.WriteLine("Invoke failed: " + ex.Message);
         }
+    }
+
+    static bool TryInvokePattern(AutomationElement el)
+    {
+        if (!el.Patterns.Invoke.IsSupported)
+        {
+            return false;
+        }
+
+        Console.WriteLine("SmartInvoke: Invoke pattern");
+        el.Patterns.Invoke.Pattern.Invoke();
+        return true;
+    }
+
+    static bool TrySelectionPattern(AutomationElement el)
+    {
+        if (!el.Patterns.SelectionItem.IsSupported)
+        {
+            return false;
+        }
+
+        Console.WriteLine("SmartInvoke: SelectionItem pattern");
+        el.Patterns.SelectionItem.Pattern.Select();
+        el.Focus();
+        SendKeys.SendWait("{ENTER}");
+        return true;
+    }
+
+    static bool TryTogglePattern(AutomationElement el)
+    {
+        if (!el.Patterns.Toggle.IsSupported)
+        {
+            return false;
+        }
+
+        Console.WriteLine("SmartInvoke: Toggle pattern");
+        el.Patterns.Toggle.Pattern.Toggle();
+        return true;
+    }
+
+    static bool TryExpandCollapsePattern(AutomationElement el)
+    {
+        if (!el.Patterns.ExpandCollapse.IsSupported)
+        {
+            return false;
+        }
+
+        Console.WriteLine("SmartInvoke: ExpandCollapse pattern");
+        var pattern = el.Patterns.ExpandCollapse.Pattern;
+        pattern.Expand();
+        return true;
+    }
+
+    static bool TryLegacyDefaultAction(AutomationElement el)
+    {
+        if (!el.Patterns.LegacyIAccessible.IsSupported)
+        {
+            return false;
+        }
+
+        Console.WriteLine("SmartInvoke: LegacyIAccessible pattern");
+        el.Patterns.LegacyIAccessible.Pattern.DoDefaultAction();
+        return true;
+    }
+
+    static void ClickAt(int x, int y)
+    {
+        SetCursorPos(x, y);
+        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
     }
 
     [DllImport("user32.dll")]

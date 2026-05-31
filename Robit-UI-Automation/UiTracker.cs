@@ -244,11 +244,11 @@ internal class UiTracker
                     try
                     {
                         var rect = el.BoundingRectangle;
-                        // if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
-                            // continue;
+                        if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
+                            continue;
 
-                        // if (el.Properties.IsOffscreen.ValueOrDefault)
-                            // continue;
+                        if (el.Properties.IsOffscreen.ValueOrDefault)
+                            continue;
 
                         var ownerHwnd = el.Properties.NativeWindowHandle.ValueOrDefault;
                         if (ownerHwnd == IntPtr.Zero)
