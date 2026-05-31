@@ -370,14 +370,14 @@ internal class UiTracker
                         ? $"MenuItem='{name}'"
                         : $"ElementType={el.ControlType} Name='{name}'";
 
-                    Console.WriteLine(
-                        $"IsActuallyVisible: {label} | " +
-                        $"ElHwnd=0x{elHwnd.ToInt64():X} ({elWindowTitle}) | " +
-                        $"Hwnd=0x{hwnd.ToInt64():X} ({windowTitle}) | " +
-                        $"ElRoot=0x{elRoot.ToInt64():X} ({windowTitle}) | " +
-                        $"Root=0x{root.ToInt64():X} ({rootTitle}) | " +
-                        $"Match={matchReason} | " +
-                        $"Result=true");
+                    // Console.WriteLine(
+                    //     $"IsActuallyVisible: {label} | " +
+                    //     $"ElHwnd=0x{elHwnd.ToInt64():X} ({elWindowTitle}) | " +
+                    //     $"Hwnd=0x{hwnd.ToInt64():X} ({windowTitle}) | " +
+                    //     $"ElRoot=0x{elRoot.ToInt64():X} ({windowTitle}) | " +
+                    //     $"Root=0x{root.ToInt64():X} ({rootTitle}) | " +
+                    //     $"Match={matchReason} | " +
+                    //     $"Result=true");
 
                     sw.Stop();
                     return true;
@@ -391,13 +391,13 @@ internal class UiTracker
                 var lastRootTitle = GetWindowTitle(lastRoot);
                 var elRootTitle = elRoot != IntPtr.Zero ? GetWindowTitle(elRoot) : "[none]";
 
-                Console.WriteLine(
-                    $"IsActuallyVisible: MenuItem='{name}' | " +
-                    $"ElHwnd=0x{elHwnd.ToInt64():X} ({elWindowTitle}) | " +
-                    $"ElRoot=0x{elRoot.ToInt64():X} ({elRootTitle}) | " +
-                    $"LastHwnd=0x{lastHwnd.ToInt64():X} ({lastWindowTitle}) | " +
-                    $"LastRoot=0x{lastRoot.ToInt64():X} ({lastRootTitle}) | " +
-                    $"Result=false\n");
+                // Console.WriteLine(
+                //     $"IsActuallyVisible: MenuItem='{name}' | " +
+                //     $"ElHwnd=0x{elHwnd.ToInt64():X} ({elWindowTitle}) | " +
+                //     $"ElRoot=0x{elRoot.ToInt64():X} ({elRootTitle}) | " +
+                //     $"LastHwnd=0x{lastHwnd.ToInt64():X} ({lastWindowTitle}) | " +
+                //     $"LastRoot=0x{lastRoot.ToInt64():X} ({lastRootTitle}) | " +
+                //     $"Result=false\n");
             }
 
             sw.Stop();
