@@ -19,3 +19,4 @@ D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI.8825B778.Up2Date
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI-Automation.exe
 D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI-Automation.pdb
+D:\Projects\Robit Ui Automation System\Robit-UI-Automation\obj\Debug\net48\Robit-UI-Automation.sourcelink.json

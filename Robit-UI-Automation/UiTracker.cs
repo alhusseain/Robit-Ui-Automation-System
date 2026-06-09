@@ -79,7 +79,7 @@ internal class UiTracker
     private readonly CustomMetrics _visibilityMetrics = new CustomMetrics("IsActuallyVisible");
     private readonly bool _measureRefresh;
     private readonly bool _measureVisibility;
-    private const int POLLING_MS = 2000;
+    private const int POLLING_MS = 500;
 
 
     public UiTracker(bool measureRefresh, bool measureVisibility)
@@ -236,6 +236,7 @@ internal class UiTracker
                     .Or(cf.ByControlType(ControlType.Slider))
                     .Or(cf.ByControlType(ControlType.TabItem))
                     .Or(cf.ByControlType(ControlType.TreeItem))
+                    .Or(cf.ByControlType(ControlType.DataItem))
                 );
                 Interlocked.Add(ref descendantCount, elements.Count());
 
