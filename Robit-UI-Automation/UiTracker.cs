@@ -79,7 +79,7 @@ internal class UiTracker
     private readonly CustomMetrics _visibilityMetrics = new CustomMetrics("IsActuallyVisible");
     private readonly bool _measureRefresh;
     private readonly bool _measureVisibility;
-    private const int POLLING_MS = 500;
+    private const int POLLING_MS = 50;
 
 
     public UiTracker(bool measureRefresh, bool measureVisibility)
