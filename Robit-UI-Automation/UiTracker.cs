@@ -499,14 +499,68 @@ internal class UiTracker
         return builder.ToString();
     }
 
+    // public List<CachedElement> GetClosest6()
+    // {
+    //     var mouse = Cursor.Position;
+
+    //     return _elements
+    //         .OrderBy(e => DistanceToRect(mouse, e.Rect))
+    //         .ThenBy(e => e.Rect.Width * e.Rect.Height)
+    //         .Where(e => IsActuallyVisible(e))
+    //         .Take(6)
+    //         .ToList();
+    // }
+
+    private static bool NearlySameRect(Rectangle a, Rectangle b)
+    {
+        const int posTolerance = 5;
+        const double sizeRatioTolerance = 0.15;
+
+        if (Math.Abs(a.Left - b.Left) > posTolerance ||
+            Math.Abs(a.Top - b.Top) > posTolerance)
+        {
+            return false;
+        }
+
+        double widthRatio =
+            Math.Abs(a.Width - b.Width) / (double)Math.Max(a.Width, b.Width);
+
+        double heightRatio =
+            Math.Abs(a.Height - b.Height) / (double)Math.Max(a.Height, b.Height);
+
+        return widthRatio < sizeRatioTolerance &&
+            heightRatio < sizeRatioTolerance;
+    }
     public List<CachedElement> GetClosest6()
     {
         var mouse = Cursor.Position;
 
-        return _elements
+        var candidates = _elements
             .OrderBy(e => DistanceToRect(mouse, e.Rect))
-            .ThenBy(e => e.Rect.Width * e.Rect.Height) // 3. Fallback size-sort allows innermost items to top the list when overlaps happen
-            .Where(e => IsActuallyVisible(e)) // 🔥 Lazy evaluation: only hit-tests the closest items!
+            .Where(e => IsActuallyVisible(e))
+            .Take(12)
+            .ToList();
+
+        // Keep smaller rectangles when duplicates exist
+        candidates = candidates
+            .OrderBy(e => e.Rect.Width * e.Rect.Height)
+            .ToList();
+
+        var deduped = new List<CachedElement>();
+
+        foreach (var candidate in candidates)
+        {
+            bool duplicate = deduped.Any(existing =>
+                NearlySameRect(candidate.Rect, existing.Rect));
+
+            if (!duplicate)
+            {
+                deduped.Add(candidate);
+            }
+        }
+
+        return deduped
+            .OrderBy(e => DistanceToRect(mouse, e.Rect))
             .Take(6)
             .ToList();
     }
