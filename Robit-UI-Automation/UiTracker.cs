@@ -99,11 +99,54 @@ internal class UiTracker
                 await Task.Delay(POLLING_MS);
             }
         });
+
+        Task.Run(async () =>
+        {
+            while (true)
+            {
+                PollWindowTitles();
+                await Task.Delay(1000);
+            }
+        });
     }
 
     public void SafeRefresh()
     {
         TriggerRefresh();
+    }
+
+    private void PollWindowTitles()
+    {
+        try
+        {
+            var desktop = _automation.GetDesktop();
+            var windows = desktop.FindAllChildren()
+                .Where(w => !w.Properties.IsOffscreen.ValueOrDefault);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Window Titles: $");
+            foreach (var win in windows)
+            {
+                try
+                {
+                    var winRect = win.BoundingRectangle;
+                    if (winRect.IsEmpty || winRect.Width <= 0 || winRect.Height <= 0)
+                        continue;
+
+                    var windowHwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
+                    var title = GetWindowTitle(windowHwnd);
+                    sb.AppendLine(title);
+                }
+                catch { }
+            }
+            sb.AppendLine("$");
+
+            Console.Write(sb.ToString());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Window title polling failed: {ex.Message}");
+        }
     }
 
     private void TriggerRefresh()
@@ -130,7 +173,6 @@ internal class UiTracker
         int windowCount = 0;
         int descendantCount = 0;
         int cachedCount = 0;
-        List<String> WindowTitles = new List<string>();
 
         try
         {
@@ -153,7 +195,6 @@ internal class UiTracker
                         return;
 
                 var windowHwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
-                WindowTitles.Add(GetWindowTitle(windowHwnd));
                 var elements = win.FindAllDescendants(cf => 
                     cf.ByControlType(ControlType.Button)
                     .Or(cf.ByControlType(ControlType.CheckBox))
@@ -202,13 +243,6 @@ internal class UiTracker
 
             _elements = newElements.ToList(); // Atomically swap in the new list to ensure thread safety
             Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
-            Console.Write("Window Titles: ");
-            foreach(var windowTitle in WindowTitles)
-            {
-                Console.Write($"{windowTitle} , ");
-
-            }
-            Console.WriteLine("");
             sw.Stop();
             if (_measureRefresh)
             {
