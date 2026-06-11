@@ -106,77 +106,6 @@ internal class UiTracker
         TriggerRefresh();
     }
 
-    private void LogAllMenuItems()
-    {
-        try
-        {
-            var desktop = _automation.GetDesktop();
-            var windows = desktop.FindAllChildren()
-                .Where(w => !w.Properties.IsOffscreen.ValueOrDefault)
-                .ToList();
-
-            Console.WriteLine();
-            Console.WriteLine("========== MENU ITEMS ==========");
-
-            int totalMenuItems = 0;
-            foreach (var win in windows)
-            {
-                var windowHwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
-                var menuItems = win.FindAllDescendants(cf =>
-                    cf.ByControlType(ControlType.MenuItem));
-
-                foreach (var item in menuItems)
-                {
-                    try
-                    {
-                        totalMenuItems++;
-                        var rect = item.BoundingRectangle;
-                        var itemHwnd = item.Properties.NativeWindowHandle.ValueOrDefault;
-                        var isOffscreen = item.Properties.IsOffscreen.ValueOrDefault;
-
-                        Console.WriteLine(
-                            $"MenuItem: '{item.Name}' | " +
-                            $"WindowHWND=0x{windowHwnd.ToInt64():X} | " +
-                            $"ItemHWND=0x{itemHwnd.ToInt64():X} | " +
-                            $"Offscreen={isOffscreen} | " +
-                            $"Rect=[L={rect.Left},T={rect.Top},W={rect.Width},H={rect.Height}]");
-
-                        var parent = item.Parent;
-                        while (parent != null)
-                        {
-                            try
-                            {
-                                var parentHwnd = parent.Properties.NativeWindowHandle.ValueOrDefault;
-                                Console.WriteLine(
-                                    $"   -> {parent.ControlType} '{parent.Name}' | " +
-                                    $"HWND=0x{parentHwnd.ToInt64():X}");
-                                parent = parent.Parent;
-                            }
-                            catch
-                            {
-                                break;
-                            }
-                        }
-
-                        Console.WriteLine("--------------------------------");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Failed MenuItem: {ex.Message}");
-                    }
-                }
-            }
-
-            Console.WriteLine($"Total MenuItems found: {totalMenuItems}");
-            Console.WriteLine("================================");
-            Console.WriteLine();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"LogAllMenuItems failed: {ex.Message}");
-        }
-    }
-
     private void TriggerRefresh()
     {
         if (_isRefreshing) return;
@@ -201,6 +130,7 @@ internal class UiTracker
         int windowCount = 0;
         int descendantCount = 0;
         int cachedCount = 0;
+        List<String> WindowTitles = new List<string>();
 
         try
         {
@@ -223,6 +153,7 @@ internal class UiTracker
                         return;
 
                 var windowHwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
+                WindowTitles.Add(GetWindowTitle(windowHwnd));
                 var elements = win.FindAllDescendants(cf => 
                     cf.ByControlType(ControlType.Button)
                     .Or(cf.ByControlType(ControlType.CheckBox))
@@ -270,7 +201,14 @@ internal class UiTracker
             });
 
             _elements = newElements.ToList(); // Atomically swap in the new list to ensure thread safety
-        Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
+            Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
+            Console.Write("Window Titles: ");
+            foreach(var windowTitle in WindowTitles)
+            {
+                Console.Write($"{windowTitle} , ");
+
+            }
+            Console.WriteLine("");
             sw.Stop();
             if (_measureRefresh)
             {
@@ -383,22 +321,6 @@ internal class UiTracker
                     sw.Stop();
                     return true;
                 }
-            }
-
-            if (isMenuItem)
-            {
-                var elWindowTitle = GetWindowTitle(elHwnd);
-                var lastWindowTitle = GetWindowTitle(lastHwnd);
-                var lastRootTitle = GetWindowTitle(lastRoot);
-                var elRootTitle = elRoot != IntPtr.Zero ? GetWindowTitle(elRoot) : "[none]";
-
-                // Console.WriteLine(
-                //     $"IsActuallyVisible: MenuItem='{name}' | " +
-                //     $"ElHwnd=0x{elHwnd.ToInt64():X} ({elWindowTitle}) | " +
-                //     $"ElRoot=0x{elRoot.ToInt64():X} ({elRootTitle}) | " +
-                //     $"LastHwnd=0x{lastHwnd.ToInt64():X} ({lastWindowTitle}) | " +
-                //     $"LastRoot=0x{lastRoot.ToInt64():X} ({lastRootTitle}) | " +
-                //     $"Result=false\n");
             }
 
             sw.Stop();
