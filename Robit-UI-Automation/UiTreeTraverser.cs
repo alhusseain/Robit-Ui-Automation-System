@@ -189,6 +189,7 @@ internal class UiTreeTraverser
             cacheRequest.Add(propertyLibrary.Element.IsEnabled);
             cacheRequest.Add(propertyLibrary.Element.IsKeyboardFocusable);
             cacheRequest.Add(propertyLibrary.Element.BoundingRectangle);
+            cacheRequest.Add(propertyLibrary.Element.IsOffscreen);
 
             using (cacheRequest.Activate())
             {
@@ -275,13 +276,16 @@ internal class UiTreeTraverser
                         var ownerHwnd = elementHwnd != IntPtr.Zero ? elementHwnd : parentHwnd;
                         var name = element.Properties.Name.ValueOrDefault ?? "[No Name]";
 
+                        GetWindowThreadProcessId(ownerHwnd, out uint pid);
                         var cached = new CachedElement
                         {
                             Element = element,
                             Rect = rect,
                             Hwnd = ownerHwnd,
                             Name = name,
-                            ControlType = controlType
+                            ControlType = controlType,
+                            ProcessId = pid,
+                            IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault
                         };
 
                         if (IsActuallyVisible(cached))
@@ -428,9 +432,14 @@ internal class UiTreeTraverser
             if (r.IsEmpty)
                 return false;
 
+            if (cached.IsOffscreen)
+                return false;
+
             var name = cached.Name;
             var controlType = cached.ControlType;
-            var isMenuItem = controlType == ControlType.MenuItem;
+            var isMenuItem = controlType == ControlType.MenuItem || 
+                             controlType == ControlType.ListItem || 
+                             controlType == ControlType.Button;
 
             var elHwnd = cached.Hwnd;
 
@@ -454,9 +463,45 @@ internal class UiTreeTraverser
                 if (elHwnd != IntPtr.Zero)
                 {
                     IntPtr pointRoot = GetAncestor(hwnd, GA_ROOT);
-                    if (hwnd == elHwnd || IsChild(elHwnd, hwnd) || IsChild(hwnd, elHwnd) || (elRoot != IntPtr.Zero && pointRoot == elRoot))
+                    if (hwnd == elHwnd)
                     {
                         isVisible = true;
+                    }
+                    else if (IsChild(hwnd, elHwnd))
+                    {
+                        isVisible = true;
+                    }
+                    else if (IsChild(elHwnd, hwnd))
+                    {
+                        // hwnd is a child/descendant of elHwnd.
+                        // If elHwnd is the main/root window, a child window (like Chrome Legacy Window)
+                        // might be overlaying/covering the parent window's browser UI elements.
+                        // We check the class name of the window at the point to see if it is a viewport.
+                        bool isMainRootWindow = GetAncestor(elHwnd, GA_ROOTOWNER) == elHwnd;
+                        if (isMainRootWindow)
+                        {
+                            var className = new StringBuilder(256);
+                            if (GetClassName(hwnd, className, className.Capacity) > 0)
+                            {
+                                var cls = className.ToString();
+                                bool isViewport = cls.IndexOf("RenderWidget", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                 cls.IndexOf("D3D", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                 cls.IndexOf("Mozilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                                 cls.IndexOf("Gecko", StringComparison.OrdinalIgnoreCase) >= 0;
+                                if (!isViewport)
+                                {
+                                    isVisible = true;
+                                }
+                            }
+                            else
+                            {
+                                isVisible = true;
+                            }
+                        }
+                        else
+                        {
+                            isVisible = true;
+                        }
                     }
                     else if (isMenuItem)
                     {

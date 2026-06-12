@@ -249,7 +249,7 @@ internal class UiTracker
             Console.WriteLine($"Refresh failed: {ex.Message}");
         }
     }
-    private static string GetWindowTitle(IntPtr hwnd)
+    internal static string GetWindowTitle(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero)
         {

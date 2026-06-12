@@ -141,6 +141,20 @@ static class Program
         }));
     }
 
+    static bool IsOffScreen(Rectangle rect)
+    {
+        bool intersectsAnyScreen = false;
+        foreach (var screen in Screen.AllScreens)
+        {
+            if (screen.Bounds.IntersectsWith(rect))
+            {
+                intersectsAnyScreen = true;
+                break;
+            }
+        }
+        return !intersectsAnyScreen;
+    }
+
     static void ShowClosestCore()
     {
         var sw = Stopwatch.StartNew();
@@ -160,8 +174,14 @@ static class Program
 
         for (int i = 0; i < closest.Count; i++)
         {
-            var name = closest[i].Name ?? "[No Name]";
+            var el = closest[i];
+            var name = el.Name ?? "[No Name]";
+            var windowTitle = UiTracker.GetWindowTitle(el.Hwnd);
+            bool offScreen = el.IsOffscreen || IsOffScreen(el.Rect);
             Console.WriteLine($"{i + 1}: {name}");
+            Console.WriteLine($"   Process ID: {el.ProcessId}");
+            Console.WriteLine($"   Window: {windowTitle} (HWND: {el.Hwnd})");
+            Console.WriteLine($"   Off-screen: {offScreen}");
         }
 
         // Write structured output for Unity so it knows the elements
@@ -172,7 +192,11 @@ static class Program
                 x = c.Rect.X,
                 y = c.Rect.Y,
                 width = c.Rect.Width,
-                height = c.Rect.Height
+                height = c.Rect.Height,
+                processId = c.ProcessId,
+                windowTitle = UiTracker.GetWindowTitle(c.Hwnd),
+                hwnd = c.Hwnd.ToInt64(),
+                offScreen = c.IsOffscreen || IsOffScreen(c.Rect)
             }).ToArray()
         };
         Console.WriteLine("CMD_RESPONSE:" + JsonConvert.SerializeObject(msgObj));

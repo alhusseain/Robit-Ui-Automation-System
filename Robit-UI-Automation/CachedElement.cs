@@ -10,4 +10,6 @@ class CachedElement
     public IntPtr Hwnd;
     public string Name;
     public ControlType ControlType;
+    public uint ProcessId;
+    public bool IsOffscreen;
 }
