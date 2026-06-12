@@ -160,8 +160,7 @@ static class Program
 
         for (int i = 0; i < closest.Count; i++)
         {
-            var el = closest[i].Element;
-            var name = el.Properties.Name.ValueOrDefault ?? "[No Name]";
+            var name = closest[i].Name ?? "[No Name]";
             Console.WriteLine($"{i + 1}: {name}");
         }
 

@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 
@@ -177,7 +178,30 @@ internal class UiTreeTraverser
                 isExplorer = IsExplorerOrFileDialog(hwnd);
             }
 
-            TraverseRecursive(rootElement, hwnd, hwnd, 0, result, isExplorer, false);
+            var cacheRequest = new CacheRequest();
+            cacheRequest.TreeScope = TreeScope.Subtree;
+
+            var propertyLibrary = rootElement.Automation.PropertyLibrary;
+            cacheRequest.Add(propertyLibrary.Element.Name);
+            cacheRequest.Add(propertyLibrary.Element.ControlType);
+            cacheRequest.Add(propertyLibrary.Element.NativeWindowHandle);
+            cacheRequest.Add(propertyLibrary.Element.AutomationId);
+            cacheRequest.Add(propertyLibrary.Element.IsEnabled);
+            cacheRequest.Add(propertyLibrary.Element.IsKeyboardFocusable);
+            cacheRequest.Add(propertyLibrary.Element.BoundingRectangle);
+
+            using (cacheRequest.Activate())
+            {
+                var cachedRoot = rootElement.Automation.FromHandle(hwnd);
+                if (cachedRoot != null)
+                {
+                    var children = cachedRoot.CachedChildren;
+                    foreach (var child in children)
+                    {
+                        TraverseRecursive(child, hwnd, hwnd, 1, result, isExplorer, false);
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -249,12 +273,15 @@ internal class UiTreeTraverser
                     if (!rect.IsEmpty && rect.Width > 0 && rect.Height > 0)
                     {
                         var ownerHwnd = elementHwnd != IntPtr.Zero ? elementHwnd : parentHwnd;
+                        var name = element.Properties.Name.ValueOrDefault ?? "[No Name]";
 
                         var cached = new CachedElement
                         {
                             Element = element,
                             Rect = rect,
-                            Hwnd = ownerHwnd
+                            Hwnd = ownerHwnd,
+                            Name = name,
+                            ControlType = controlType
                         };
 
                         if (IsActuallyVisible(cached))
@@ -272,7 +299,7 @@ internal class UiTreeTraverser
             }
 
             // 4. Traverse children
-            var children = element.FindAllChildren();
+            var children = element.CachedChildren;
             bool isListOrDataItem = controlType == ControlType.ListItem || 
                                     controlType == ControlType.DataItem || 
                                     controlType == ControlType.TreeItem;
@@ -306,7 +333,7 @@ internal class UiTreeTraverser
         }
         catch
         {
-            // Ignore child errors to continue traversing other branches
+            // Silent catch
         }
     }
 
@@ -401,8 +428,9 @@ internal class UiTreeTraverser
             if (r.IsEmpty)
                 return false;
 
-            var name = el.Properties.Name.ValueOrDefault ?? "[No Name]";
-            var isMenuItem = el.ControlType == ControlType.MenuItem;
+            var name = cached.Name;
+            var controlType = cached.ControlType;
+            var isMenuItem = controlType == ControlType.MenuItem;
 
             var elHwnd = cached.Hwnd;
 
@@ -447,7 +475,7 @@ internal class UiTreeTraverser
                     {
                         _visibilityMetrics.RecordTiming(
                             sw.ElapsedMilliseconds,
-                            $"name='{name}', type={el.ControlType}, result=true"
+                            $"name='{name}', type={controlType}, result=true"
                         );
                     }
                     return true;
@@ -459,7 +487,7 @@ internal class UiTreeTraverser
             {
                 _visibilityMetrics.RecordTiming(
                     sw.ElapsedMilliseconds,
-                    $"name='{name}', type={el.ControlType}, result=false"
+                    $"name='{name}', type={controlType}, result=false"
                 );
             }
             return false;

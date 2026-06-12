@@ -36,6 +36,29 @@ internal class UiTracker
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
 
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out bool pvAttribute, int cbAttribute);
+
+    private const int DWMWA_CLOAKED = 14;
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    private static bool IsWindowCloaked(IntPtr hwnd)
+    {
+        try
+        {
+            int hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out bool isCloaked, Marshal.SizeOf<bool>());
+            return hr == 0 && isCloaked;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private UIA3Automation _automation;
     private volatile List<CachedElement> _elements = new List<CachedElement>();
     private OverlayForm _overlay;
@@ -85,26 +108,31 @@ internal class UiTracker
     {
         try
         {
-            var desktop = _automation.GetDesktop();
-            var windows = desktop.FindAllChildren()
-                .Where(w => !w.Properties.IsOffscreen.ValueOrDefault);
-
             var sb = new StringBuilder();
             sb.AppendLine("Window Titles: $");
-            foreach (var win in windows)
+
+            EnumWindows((hwnd, lParam) =>
             {
                 try
                 {
-                    var winRect = win.BoundingRectangle;
-                    if (winRect.IsEmpty || winRect.Width <= 0 || winRect.Height <= 0)
-                        continue;
-
-                    var windowHwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
-                    var title = GetWindowTitle(windowHwnd);
-                    sb.AppendLine(title);
+                    if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
+                    {
+                        if (Native.GetWindowRect(hwnd, out var rect))
+                        {
+                            int width = rect.Right - rect.Left;
+                            int height = rect.Bottom - rect.Top;
+                            if (width > 0 && height > 0)
+                            {
+                                var title = GetWindowTitle(hwnd);
+                                sb.AppendLine(title);
+                            }
+                        }
+                    }
                 }
                 catch { }
-            }
+                return true;
+            }, IntPtr.Zero);
+
             sb.AppendLine("$");
 
             Console.Write(sb.ToString());
@@ -142,34 +170,60 @@ internal class UiTracker
 
         try
         {
-            var desktop = _automation.GetDesktop();
+            var windowHandles = new List<IntPtr>();
+            EnumWindows((hwnd, lParam) =>
+            {
+                try
+                {
+                    if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
+                    {
+                        if (Native.GetWindowRect(hwnd, out var rect))
+                        {
+                            int width = rect.Right - rect.Left;
+                            int height = rect.Bottom - rect.Top;
+                            if (width > 0 && height > 0)
+                            {
+                                windowHandles.Add(hwnd);
+                            }
+                        }
+                    }
+                }
+                catch { }
+                return true;
+            }, IntPtr.Zero);
 
-            var windows = desktop.FindAllChildren()
-                .Where(w => {
-                    var hwnd = w.Properties.NativeWindowHandle.ValueOrDefault;
-                    if (hwnd == IntPtr.Zero) return false;
-                    return IsWindowVisible(hwnd) && !IsIconic(hwnd);
-                })
-                .ToList();
+            var windows = new List<AutomationElement>();
+            foreach (var hwnd in windowHandles)
+            {
+                try
+                {
+                    var win = _automation.FromHandle(hwnd);
+                    if (win != null)
+                    {
+                        windows.Add(win);
+                    }
+                }
+                catch { }
+            }
             windowCount = windows.Count;
 
             var newElements = new ConcurrentBag<CachedElement>();
 
-            Parallel.ForEach(windows, win =>
+            foreach (var win in windows)
             {
                 try
                 {
                     var elements = _traverser.Traverse(win);
-                    Interlocked.Add(ref descendantCount, elements.Count);
+                    descendantCount += elements.Count;
 
                     foreach (var el in elements)
                     {
                         newElements.Add(el);
-                        Interlocked.Increment(ref cachedCount);
+                        cachedCount++;
                     }
                 }
                 catch { }
-            });
+            }
 
             _elements = newElements.ToList(); // Atomically swap in the new list to ensure thread safety
             Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
