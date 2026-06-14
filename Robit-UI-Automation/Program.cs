@@ -236,17 +236,66 @@ static class Program
                 AutomationElement targetEl = item.Element;
                 try
                 {
-                    int x = item.Rect.Left + item.Rect.Width / 2;
-                    int y = item.Rect.Top + item.Rect.Height / 2;
-                    var liveEl = tracker.Automation.FromPoint(new Point(x, y));
-                    if (liveEl != null)
+                    AutomationElement windowEl = tracker.Automation.FromHandle(item.Hwnd);
+                    if (windowEl != null)
                     {
-                        targetEl = liveEl;
+                        var windowRuntimeId = windowEl.Properties.RuntimeId.ValueOrDefault;
+                        if (item.RuntimeId != null && windowRuntimeId != null && Enumerable.SequenceEqual(windowRuntimeId, item.RuntimeId))
+                        {
+                            targetEl = windowEl;
+                        }
+                        else if (item.RuntimeId != null)
+                        {
+                            var runtimeIdCond = new FlaUI.Core.Conditions.PropertyCondition(
+                                tracker.Automation.PropertyLibrary.Element.RuntimeId,
+                                item.RuntimeId
+                            );
+                            var liveEl = windowEl.FindFirstDescendant(runtimeIdCond);
+                            if (liveEl != null)
+                            {
+                                targetEl = liveEl;
+                            }
+                        }
+
+                        if (targetEl == item.Element && !string.IsNullOrEmpty(item.AutomationId))
+                        {
+                            var liveEl = windowEl.FindFirstDescendant(cf =>
+                                cf.ByAutomationId(item.AutomationId!).And(cf.ByControlType(item.ControlType))
+                            );
+                            if (liveEl != null)
+                            {
+                                targetEl = liveEl;
+                            }
+                        }
+                    }
+
+                    if (targetEl == item.Element)
+                    {
+                        int x = item.Rect.Left + item.Rect.Width / 2;
+                        int y = item.Rect.Top + item.Rect.Height / 2;
+                        var liveEl = tracker.Automation.FromPoint(new Point(x, y));
+                        if (liveEl != null)
+                        {
+                            int livePid = 0;
+                            try { livePid = liveEl.Properties.ProcessId.ValueOrDefault; } catch { }
+
+                            bool isOverlay = (liveEl.Properties.NativeWindowHandle.ValueOrDefault == overlay.Handle) ||
+                                             (livePid == Process.GetCurrentProcess().Id);
+
+                            if (!isOverlay)
+                            {
+                                targetEl = liveEl;
+                            }
+                            else
+                            {
+                                Console.WriteLine("FromPoint hit overlay, ignoring.");
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Failed to resolve live element from point: " + ex.Message);
+                    Console.WriteLine("Failed to resolve live element: " + ex.Message);
                 }
 
                 string action = SmartInvoke(targetEl, item.Rect);

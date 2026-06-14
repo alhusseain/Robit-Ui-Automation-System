@@ -95,24 +95,24 @@ internal class UiTreeTraverser
     // List of control types that are definitely leaf nodes and don't need their children traversed
     private static readonly HashSet<ControlType> LeafControlTypes = new HashSet<ControlType>
     {
-        ControlType.Button,
-        ControlType.CheckBox,
-        ControlType.RadioButton,
-        ControlType.Slider,
-        ControlType.Hyperlink,
-        ControlType.Text,
-        ControlType.Image,
-        ControlType.Edit,
-        ControlType.ProgressBar,
-        ControlType.Thumb,
-        ControlType.ToolTip,
-        ControlType.ScrollBar,
-        ControlType.Separator,
-        ControlType.Spinner,
-        ControlType.SplitButton,
-        ControlType.StatusBar,
-        ControlType.Header,
-        ControlType.HeaderItem
+        // ControlType.Button,
+        // ControlType.CheckBox,
+        // ControlType.RadioButton,
+        // ControlType.Slider,
+        // ControlType.Hyperlink,
+        // ControlType.Text,
+        // ControlType.Image,
+        // ControlType.Edit,
+        // ControlType.ProgressBar,
+        // ControlType.Thumb,
+        // ControlType.ToolTip,
+        // ControlType.ScrollBar,
+        // ControlType.Separator,
+        // ControlType.Spinner,
+        // ControlType.SplitButton,
+        // ControlType.StatusBar,
+        // // ControlType.Header,
+        // // ControlType.HeaderItem
     };
 
     private readonly CustomMetrics _visibilityMetrics = new CustomMetrics("IsActuallyVisible");
@@ -192,6 +192,7 @@ internal class UiTreeTraverser
             cacheRequest.Add(propertyLibrary.Element.IsKeyboardFocusable);
             cacheRequest.Add(propertyLibrary.Element.BoundingRectangle);
             cacheRequest.Add(propertyLibrary.Element.IsOffscreen);
+            cacheRequest.Add(propertyLibrary.Element.RuntimeId);
 
             using (cacheRequest.Activate())
             {
@@ -287,7 +288,9 @@ internal class UiTreeTraverser
                             Name = name,
                             ControlType = controlType,
                             ProcessId = pid,
-                            IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault
+                            IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault,
+                            AutomationId = element.Properties.AutomationId.ValueOrDefault,
+                            RuntimeId = element.Properties.RuntimeId.ValueOrDefault
                         };
 
                         if (IsActuallyVisible(cached))

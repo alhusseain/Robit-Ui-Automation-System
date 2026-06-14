@@ -12,4 +12,6 @@ class CachedElement
     public ControlType ControlType;
     public uint ProcessId;
     public bool IsOffscreen;
+    public string? AutomationId;
+    public int[]? RuntimeId;
 }
