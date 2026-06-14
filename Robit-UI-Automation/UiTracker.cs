@@ -60,6 +60,7 @@ internal class UiTracker
     }
 
     private UIA3Automation _automation;
+    public UIA3Automation Automation => _automation;
     private volatile List<CachedElement> _elements = new List<CachedElement>();
     private OverlayForm _overlay;
     private volatile bool _isRefreshing = false;
@@ -70,7 +71,7 @@ internal class UiTracker
     private const int POLLING_MS = 500;
 
 
-    public UiTracker(bool measureRefresh, bool measureVisibility)
+    public UiTracker(bool measureRefresh, bool measureVisibility, bool enableWindowPolling)
     {
         _automation = new UIA3Automation();
         _measureRefresh = measureRefresh;
@@ -89,14 +90,17 @@ internal class UiTracker
             }
         });
 
-        Task.Run(async () =>
+        if (enableWindowPolling)
         {
-            while (true)
+            Task.Run(async () =>
             {
-                PollWindowTitles();
-                await Task.Delay(1000);
-            }
-        });
+                while (true)
+                {
+                    PollWindowTitles();
+                    await Task.Delay(1000);
+                }
+            });
+        }
     }
 
     public void SafeRefresh()

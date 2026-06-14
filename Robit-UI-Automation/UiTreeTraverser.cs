@@ -87,7 +87,9 @@ internal class UiTreeTraverser
         ControlType.Slider,
         ControlType.TabItem,
         ControlType.TreeItem,
-        ControlType.DataItem
+        ControlType.DataItem,
+        ControlType.Edit,
+        // ControlType.Document
     };
 
     // List of control types that are definitely leaf nodes and don't need their children traversed
@@ -255,17 +257,17 @@ internal class UiTreeTraverser
             // 2. Collect if it matches target controls
             if (TargetControlTypes.Contains(controlType))
             {
-                // Special filter for Edit controls to avoid clashing with non-interactive text elements
+                // Special filter for Edit and Document controls to avoid clashing with non-interactive text elements
                 bool isInteractiveEdit = true;
-                if (controlType == ControlType.Edit)
+                if (controlType == ControlType.Edit || controlType == ControlType.Document)
                 {
                     var autoId = element.Properties.AutomationId.ValueOrDefault;
                     bool isSystemField = autoId != null && autoId.StartsWith("System.", StringComparison.OrdinalIgnoreCase);
 
                     isInteractiveEdit = !isSystemField && 
-                                        !(isExplorer && insideListItem) &&
-                                        element.Properties.IsEnabled.ValueOrDefault && 
-                                        element.Properties.IsKeyboardFocusable.ValueOrDefault;
+                                         !(isExplorer && insideListItem) &&
+                                         element.Properties.IsEnabled.ValueOrDefault && 
+                                         element.Properties.IsKeyboardFocusable.ValueOrDefault;
                 }
 
                 if (isInteractiveEdit)

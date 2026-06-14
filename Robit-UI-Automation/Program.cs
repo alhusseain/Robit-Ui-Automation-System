@@ -8,6 +8,8 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Input;
+using FlaUI.Core.Definitions;
 using Gma.System.MouseKeyHook;
 using Newtonsoft.Json;
 
@@ -28,10 +30,15 @@ static class Program
     {
         settings = AppSettings.Load();
 
+        if (settings.InputMode == "io")
+        {
+            Console.SetOut(new FilteredTextWriter(Console.Out));
+        }
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
-        tracker = new UiTracker(settings.MeasureRefresh, settings.MeasureVisibility);
+        tracker = new UiTracker(settings.MeasureRefresh, settings.MeasureVisibility, settings.InputMode == "test");
         overlay = new OverlayForm();
 
         tracker.AttachOverlay(overlay);
@@ -225,7 +232,34 @@ static class Program
 
             try
             {
-                SmartInvoke(item.Element, item.Rect);
+                // Resolve the live element from the center point of the cached item to avoid COM HRESULT E_FAIL issues with cached elements
+                AutomationElement targetEl = item.Element;
+                try
+                {
+                    int x = item.Rect.Left + item.Rect.Width / 2;
+                    int y = item.Rect.Top + item.Rect.Height / 2;
+                    var liveEl = tracker.Automation.FromPoint(new Point(x, y));
+                    if (liveEl != null)
+                    {
+                        targetEl = liveEl;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Failed to resolve live element from point: " + ex.Message);
+                }
+
+                string action = SmartInvoke(targetEl, item.Rect);
+
+                var logObj = new {
+                    type = "invoked",
+                    index = index,
+                    name = item.Name,
+                    controlType = item.ControlType.ToString(),
+                    action = action,
+                    rect = new { x = item.Rect.X, y = item.Rect.Y, width = item.Rect.Width, height = item.Rect.Height }
+                };
+                Console.WriteLine("CMD_RESPONSE:" + JsonConvert.SerializeObject(logObj));
             }
             finally
             {
@@ -278,8 +312,18 @@ static class Program
 
 
 
-    static void SmartInvoke(AutomationElement el, Rectangle rect)
+    static string SmartInvoke(AutomationElement el, Rectangle rect)
     {
+        ControlType controlType = ControlType.Custom;
+        try
+        {
+            controlType = el.ControlType;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Failed to get ControlType: " + ex.Message);
+        }
+
         try
         {
             if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
@@ -290,110 +334,194 @@ static class Program
                     rect = bounding;
                 }
             }
-
-            if (TryInvokePattern(el))
-            {
-                return;
-            }
-
-            if (TrySelectionPattern(el))
-            {
-                return;
-            }
-
-            if (TryTogglePattern(el))
-            {
-                return;
-            }
-
-            if (TryExpandCollapsePattern(el))
-            {
-                return;
-            }
-
-            if (TryLegacyDefaultAction(el))
-            {
-                return;
-            }
-
-            int x = rect.Left + rect.Width / 2;
-            int y = rect.Top + rect.Height / 2;
-            ClickAt(x, y);
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Invoke failed: " + ex.Message);
+            Console.WriteLine("Failed to get BoundingRectangle: " + ex.Message);
+        }
+
+        if (controlType == ControlType.Edit || controlType == ControlType.Document)
+        {
+            try
+            {
+                el.Focus();
+            }
+            catch { }
+        }
+
+        if (TryInvokePattern(el))
+        {
+            return "InvokePattern";
+        }
+
+        if (TrySelectionPattern(el))
+        {
+            return "SelectionPattern";
+        }
+
+        if (TryTogglePattern(el))
+        {
+            return "TogglePattern";
+        }
+
+        if (TryExpandCollapsePattern(el))
+        {
+            return "ExpandCollapsePattern";
+        }
+
+        if (TryLegacyDefaultAction(el))
+        {
+            return "LegacyDefaultAction";
+        }
+
+        try
+        {
+            int x = rect.Left + rect.Width / 2;
+            int y = rect.Top + rect.Height / 2;
+
+            bool requiresDoubleClick = controlType == ControlType.ListItem ||
+                                        controlType == ControlType.TreeItem ||
+                                        controlType == ControlType.DataItem ||
+                                        controlType == ControlType.Edit ||
+                                        controlType == ControlType.Document;
+
+            if (requiresDoubleClick)
+            {
+                Console.WriteLine($"SmartInvoke: Fallback Double Click at ({x}, {y}) for {controlType}");
+                DoubleClickAt(x, y);
+                return "FallbackDoubleClick";
+            }
+            else
+            {
+                Console.WriteLine($"SmartInvoke: Fallback Click at ({x}, {y}) for {controlType}");
+                ClickAt(x, y);
+                return "FallbackClick";
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Fallback click failed: " + ex.Message);
+            return "Failed: " + ex.Message;
         }
     }
 
     static bool TryInvokePattern(AutomationElement el)
     {
-        if (!el.Patterns.Invoke.IsSupported)
+        try
         {
+            if (!el.Patterns.Invoke.IsSupported)
+            {
+                return false;
+            }
+
+            Console.WriteLine("SmartInvoke: Invoke pattern");
+            el.Patterns.Invoke.Pattern.Invoke();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TryInvokePattern failed: " + ex.Message);
             return false;
         }
-
-        Console.WriteLine("SmartInvoke: Invoke pattern");
-        el.Patterns.Invoke.Pattern.Invoke();
-        return true;
     }
 
     static bool TrySelectionPattern(AutomationElement el)
     {
-        if (!el.Patterns.SelectionItem.IsSupported)
+        try
         {
+            if (!el.Patterns.SelectionItem.IsSupported)
+            {
+                return false;
+            }
+
+            Console.WriteLine("SmartInvoke: SelectionItem pattern");
+            el.Patterns.SelectionItem.Pattern.Select();
+            try
+            {
+                el.Focus();
+            }
+            catch { }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TrySelectionPattern failed: " + ex.Message);
             return false;
         }
-
-        Console.WriteLine("SmartInvoke: SelectionItem pattern");
-        el.Patterns.SelectionItem.Pattern.Select();
-        el.Focus();
-        SendKeys.SendWait("{ENTER}");
-        return true;
     }
 
     static bool TryTogglePattern(AutomationElement el)
     {
-        if (!el.Patterns.Toggle.IsSupported)
+        try
         {
+            if (!el.Patterns.Toggle.IsSupported)
+            {
+                return false;
+            }
+
+            Console.WriteLine("SmartInvoke: Toggle pattern");
+            el.Patterns.Toggle.Pattern.Toggle();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TryTogglePattern failed: " + ex.Message);
             return false;
         }
-
-        Console.WriteLine("SmartInvoke: Toggle pattern");
-        el.Patterns.Toggle.Pattern.Toggle();
-        return true;
     }
 
     static bool TryExpandCollapsePattern(AutomationElement el)
     {
-        if (!el.Patterns.ExpandCollapse.IsSupported)
+        try
         {
+            if (!el.Patterns.ExpandCollapse.IsSupported)
+            {
+                return false;
+            }
+
+            Console.WriteLine("SmartInvoke: ExpandCollapse pattern");
+            var pattern = el.Patterns.ExpandCollapse.Pattern;
+            var state = pattern.ExpandCollapseState.Value;
+            if (state == ExpandCollapseState.Collapsed)
+            {
+                pattern.Expand();
+            }
+            else
+            {
+                pattern.Collapse();
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TryExpandCollapsePattern failed: " + ex.Message);
             return false;
         }
-
-        Console.WriteLine("SmartInvoke: ExpandCollapse pattern");
-        var pattern = el.Patterns.ExpandCollapse.Pattern;
-        pattern.Expand();
-        return true;
     }
 
     static bool TryLegacyDefaultAction(AutomationElement el)
     {
-        if (!el.Patterns.LegacyIAccessible.IsSupported)
+        try
         {
+            if (!el.Patterns.LegacyIAccessible.IsSupported)
+            {
+                return false;
+            }
+
+            Console.WriteLine("SmartInvoke: LegacyIAccessible pattern");
+            el.Patterns.LegacyIAccessible.Pattern.DoDefaultAction();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("TryLegacyDefaultAction failed: " + ex.Message);
             return false;
         }
-
-        Console.WriteLine("SmartInvoke: LegacyIAccessible pattern");
-        el.Patterns.LegacyIAccessible.Pattern.DoDefaultAction();
-        return true;
     }
 
     static void ClickAt(int x, int y)
     {
-        SetCursorPos(x, y);
-        mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-        mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
+        Mouse.LeftClick(new Point(x, y));
     }
 
     [DllImport("user32.dll")]
@@ -407,13 +535,7 @@ static class Program
 
     static void DoubleClickAt(int x, int y)
     {
-        SetCursorPos(x, y);
-
-        for (int i = 0; i < 2; i++)
-        {
-            mouse_event(LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(LEFTUP, 0, 0, 0, UIntPtr.Zero);
-        }
+        Mouse.LeftDoubleClick(new Point(x, y));
     }
 
     sealed class AppSettings
@@ -521,6 +643,75 @@ static class Program
         {
             string normalized = value.Trim().ToLowerInvariant();
             return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
+        }
+    }
+}
+
+public class FilteredTextWriter : TextWriter
+{
+    private readonly TextWriter _original;
+    private readonly System.Text.StringBuilder _lineBuffer = new System.Text.StringBuilder();
+    private readonly object _lock = new object();
+
+    public FilteredTextWriter(TextWriter original)
+    {
+        _original = original;
+    }
+
+    public override System.Text.Encoding Encoding => _original.Encoding;
+
+    public override void Write(char value)
+    {
+        lock (_lock)
+        {
+            if (value == '\n')
+            {
+                FlushBuffer();
+            }
+            else if (value != '\r')
+            {
+                _lineBuffer.Append(value);
+            }
+        }
+    }
+
+    public override void Write(string value)
+    {
+        if (value == null) return;
+        lock (_lock)
+        {
+            foreach (char c in value)
+            {
+                if (c == '\n')
+                {
+                    FlushBuffer();
+                }
+                else if (c != '\r')
+                {
+                    _lineBuffer.Append(c);
+                }
+            }
+        }
+    }
+
+    public override void WriteLine(string value)
+    {
+        if (value == null) return;
+        lock (_lock)
+        {
+            _lineBuffer.Append(value);
+            FlushBuffer();
+        }
+    }
+
+    private void FlushBuffer()
+    {
+        string line = _lineBuffer.ToString();
+        _lineBuffer.Clear();
+
+        if (line.StartsWith("CMD_RESPONSE:", StringComparison.OrdinalIgnoreCase))
+        {
+            _original.WriteLine(line);
         }
     }
 }
