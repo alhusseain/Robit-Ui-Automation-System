@@ -173,8 +173,51 @@ internal class UiTreeTraverser
         var result = new List<CachedElement>();
         try
         {
-            bool isExplorer = false;
             var hwnd = rootElement.Properties.NativeWindowHandle.ValueOrDefault;
+            string className = "";
+            try { className = rootElement.Properties.ClassName.ValueOrDefault; } catch { }
+
+            bool isTouchKeyboard = false;
+            if (className == "IPTip_Main_Window" || IsTouchKeyboardWindow(hwnd))
+            {
+                isTouchKeyboard = true;
+                if (diagnostics != null)
+                {
+                    diagnostics.AddLog(0, "Touch Keyboard window detected. Resolving real UWP keyboard UIA element from Desktop descendants...");
+                }
+
+                try
+                {
+                    var desktop = rootElement.Automation.GetDesktop();
+                    if (desktop != null)
+                    {
+                        var keyboard = desktop.FindFirst(TreeScope.Children, rootElement.Automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
+                        if (keyboard == null)
+                        {
+                            keyboard = desktop.FindFirst(TreeScope.Descendants, rootElement.Automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
+                        }
+
+                        if (keyboard != null)
+                        {
+                            if (diagnostics != null)
+                            {
+                                diagnostics.AddLog(1, "Successfully resolved real UWP keyboard UIA element. Swapping rootElement and performing direct raw descendant traversal.");
+                            }
+                            rootElement = keyboard;
+                            hwnd = IntPtr.Zero; // Bypass regular HWND visibility/caching
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (diagnostics != null)
+                    {
+                        diagnostics.AddLog(1, "Failed to resolve real keyboard element: " + ex.Message);
+                    }
+                }
+            }
+
+            bool isExplorer = false;
             if (hwnd != IntPtr.Zero)
             {
                 bool isVisibleSimple = IsWindowVisibleSimple(hwnd);
@@ -202,6 +245,21 @@ internal class UiTreeTraverser
                 isExplorer = IsExplorerOrFileDialog(hwnd);
             }
 
+            if (hwnd == IntPtr.Zero)
+            {
+                // Traverse raw children directly without caching (needed for UWP/secure windows like the keyboard)
+                var children = GetChildren(rootElement);
+                if (diagnostics != null)
+                {
+                    diagnostics.AddLog(1, $"Starting raw traversal on {children.Length} children (no HWND/cache)...");
+                }
+                foreach (var child in children)
+                {
+                    TraverseRecursive(child, IntPtr.Zero, IntPtr.Zero, 1, result, false, false, isTouchKeyboard, diagnostics);
+                }
+                return result;
+            }
+
             var cacheRequest = new CacheRequest();
             cacheRequest.TreeScope = TreeScope.Subtree;
 
@@ -221,14 +279,14 @@ internal class UiTreeTraverser
                 var cachedRoot = rootElement.Automation.FromHandle(hwnd);
                 if (cachedRoot != null)
                 {
-                    var children = cachedRoot.CachedChildren;
+                    var children = GetChildren(cachedRoot);
                     if (diagnostics != null)
                     {
-                        diagnostics.AddLog(1, $"Starting traversal on {children.Length} cached children...");
+                        diagnostics.AddLog(1, $"Starting traversal on {children.Length} children...");
                     }
                     foreach (var child in children)
                     {
-                        TraverseRecursive(child, hwnd, hwnd, 1, result, isExplorer, false, diagnostics);
+                        TraverseRecursive(child, hwnd, hwnd, 1, result, isExplorer, false, isTouchKeyboard, diagnostics);
                     }
                 }
                 else
@@ -251,6 +309,28 @@ internal class UiTreeTraverser
         return result;
     }
 
+    private AutomationElement[] GetChildren(AutomationElement element)
+    {
+        try
+        {
+            var cached = element.CachedChildren;
+            if (cached != null && cached.Length > 0)
+            {
+                return cached;
+            }
+        }
+        catch { }
+
+        try
+        {
+            return element.FindAllChildren();
+        }
+        catch
+        {
+            return new AutomationElement[0];
+        }
+    }
+
     private void TraverseRecursive(
         AutomationElement element, 
         IntPtr windowHwnd, 
@@ -259,6 +339,7 @@ internal class UiTreeTraverser
         List<CachedElement> result,
         bool isExplorer,
         bool insideListItem,
+        bool isTouchKeyboard,
         TreeTraversalDiagnostics? diagnostics)
     {
         if (diagnostics != null)
@@ -373,7 +454,8 @@ internal class UiTreeTraverser
                             ProcessId = pid,
                             IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault,
                             AutomationId = element.Properties.AutomationId.ValueOrDefault,
-                            RuntimeId = element.Properties.RuntimeId.ValueOrDefault
+                            RuntimeId = element.Properties.RuntimeId.ValueOrDefault,
+                            IsTouchKeyboard = isTouchKeyboard
                         };
 
                         if (cached.IsOffscreen)
@@ -439,7 +521,7 @@ internal class UiTreeTraverser
             }
 
             // 4. Traverse children
-            var children = element.CachedChildren;
+            var children = GetChildren(element);
             bool isListOrDataItem = controlType == ControlType.ListItem || 
                                     controlType == ControlType.DataItem || 
                                     controlType == ControlType.TreeItem;
@@ -473,7 +555,7 @@ internal class UiTreeTraverser
                 if (childHwnd == IntPtr.Zero)
                     childHwnd = parentHwnd;
 
-                TraverseRecursive(child, windowHwnd, childHwnd, depth + 1, result, isExplorer, nextInsideListItem, diagnostics);
+                TraverseRecursive(child, windowHwnd, childHwnd, depth + 1, result, isExplorer, nextInsideListItem, isTouchKeyboard, diagnostics);
             }
         }
         catch (Exception ex)
@@ -494,22 +576,21 @@ internal class UiTreeTraverser
             if (GetClassName(hwnd, className, className.Capacity) > 0)
             {
                 var cls = className.ToString();
-                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase))
+                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase) ||
+                    cls.Equals("IPTip_Main_Window", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
             }
 
-            int len = GetWindowTextLength(hwnd);
-            if (len > 0)
+            var title = new StringBuilder(256);
+            if (GetWindowText(hwnd, title, title.Capacity) > 0)
             {
-                var title = new StringBuilder(len + 1);
-                if (GetWindowText(hwnd, title, title.Capacity) > 0)
+                var titleStr = title.ToString();
+                if (titleStr.Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase) ||
+                    titleStr.Equals("Windows Input Experience", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (title.ToString().Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase))
-                    {
-                        return true;
-                    }
+                    return true;
                 }
             }
         }
@@ -628,7 +709,7 @@ internal class UiTreeTraverser
 
             var elHwnd = cached.Hwnd;
 
-            if (IsTouchKeyboardWindow(elHwnd))
+            if (cached.IsTouchKeyboard || IsTouchKeyboardWindow(elHwnd))
             {
                 details?.AppendLine("      - Touch keyboard window, returning visible=true");
                 sw.Stop();

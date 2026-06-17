@@ -14,4 +14,5 @@ class CachedElement
     public bool IsOffscreen;
     public string? AutomationId;
     public int[]? RuntimeId;
+    public bool IsTouchKeyboard;
 }

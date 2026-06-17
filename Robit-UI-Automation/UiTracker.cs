@@ -49,6 +49,12 @@ internal class UiTracker
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     private static bool IsTouchKeyboardWindow(IntPtr hwnd)
     {
         try
@@ -57,14 +63,16 @@ internal class UiTracker
             if (GetClassName(hwnd, className, className.Capacity) > 0)
             {
                 var cls = className.ToString();
-                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase))
+                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase) ||
+                    cls.Equals("IPTip_Main_Window", StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
             }
 
             var title = GetWindowTitle(hwnd);
-            if (title.Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase))
+            if (title.Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase) ||
+                title.Equals("Windows Input Experience", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
@@ -225,6 +233,12 @@ internal class UiTracker
             {
                 try
                 {
+                    var hwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
+                    if (IsTouchKeyboardWindow(hwnd))
+                    {
+                        continue;
+                    }
+
                     var elements = _traverser.Traverse(win);
                     descendantCount += elements.Count;
 
@@ -236,6 +250,31 @@ internal class UiTracker
                 }
                 catch { }
             }
+
+            try
+            {
+                var desktop = _automation.GetDesktop();
+                if (desktop != null)
+                {
+                    var keyboard = desktop.FindFirst(TreeScope.Children, _automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
+                    if (keyboard == null)
+                    {
+                        keyboard = desktop.FindFirst(TreeScope.Descendants, _automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
+                    }
+
+                    if (keyboard != null)
+                    {
+                        var elements = _traverser.Traverse(keyboard);
+                        descendantCount += elements.Count;
+                        foreach (var el in elements)
+                        {
+                            newElements.Add(el);
+                            cachedCount++;
+                        }
+                    }
+                }
+            }
+            catch { }
 
             _elements = newElements.ToList(); // Atomically swap in the new list to ensure thread safety
             Console.WriteLine($"Cached {_elements.Count} visible UI elements across all windows");
@@ -268,20 +307,20 @@ internal class UiTracker
             return "[none]";
         }
 
-        int len = GetWindowTextLength(hwnd);
-        if (len <= 0)
+        var builder = new StringBuilder(256);
+        if (GetWindowText(hwnd, builder, builder.Capacity) > 0)
         {
-            return "[no title]";
+            return builder.ToString();
         }
 
-        var builder = new StringBuilder(len + 1);
-        GetWindowText(hwnd, builder, builder.Capacity);
-        return builder.ToString();
+        return "[no title]";
     }
 
     internal static List<IntPtr> GetVisibleWindowHandles()
     {
         var windowHandles = new List<IntPtr>();
+        var touchKeyboardPids = new HashSet<uint>();
+
         EnumWindows((hwnd, lParam) =>
         {
             try
@@ -295,6 +334,15 @@ internal class UiTracker
                         if (width > 0 && height > 0)
                         {
                             windowHandles.Add(hwnd);
+
+                            if (IsTouchKeyboardWindow(hwnd))
+                            {
+                                GetWindowThreadProcessId(hwnd, out uint pid);
+                                if (pid != 0)
+                                {
+                                    touchKeyboardPids.Add(pid);
+                                }
+                            }
                         }
                     }
                 }
@@ -302,6 +350,30 @@ internal class UiTracker
             catch { }
             return true;
         }, IntPtr.Zero);
+
+        // Find all CoreWindows belonging to the touch keyboard processes and add them
+        foreach (var pid in touchKeyboardPids)
+        {
+            IntPtr childHwnd = IntPtr.Zero;
+            while (true)
+            {
+                childHwnd = FindWindowEx(IntPtr.Zero, childHwnd, "Windows.UI.Core.CoreWindow", null);
+                if (childHwnd == IntPtr.Zero)
+                {
+                    break;
+                }
+
+                GetWindowThreadProcessId(childHwnd, out uint childPid);
+                if (childPid == pid)
+                {
+                    if (!windowHandles.Contains(childHwnd))
+                    {
+                        windowHandles.Add(childHwnd);
+                    }
+                }
+            }
+        }
+
         return windowHandles;
     }
 
