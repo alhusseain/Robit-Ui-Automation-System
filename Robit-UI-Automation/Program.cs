@@ -462,69 +462,149 @@ static class Program
             {
                 // Resolve the live element from the center point of the cached item to avoid COM HRESULT E_FAIL issues with cached elements
                 AutomationElement targetEl = item.Element;
+                string resolveMethod = "Cached";
+                List<string> resolutionSteps = new List<string>();
                 try
                 {
-                    AutomationElement windowEl = tracker.Automation.FromHandle(item.Hwnd);
+                    AutomationElement windowEl = null;
+                    try
+                    {
+                        windowEl = tracker.Automation.FromHandle(item.Hwnd);
+                        if (windowEl == null)
+                        {
+                            resolutionSteps.Add("FromHandle returned null");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        resolutionSteps.Add("FromHandle failed: " + ex.Message);
+                    }
+
                     if (windowEl != null)
                     {
-                        var windowRuntimeId = windowEl.Properties.RuntimeId.ValueOrDefault;
-                        if (item.RuntimeId != null && windowRuntimeId != null && Enumerable.SequenceEqual(windowRuntimeId, item.RuntimeId))
+                        // 1. Try RuntimeId (Window)
+                        try
                         {
-                            targetEl = windowEl;
-                        }
-                        else if (item.RuntimeId != null)
-                        {
-                            var runtimeIdCond = new FlaUI.Core.Conditions.PropertyCondition(
-                                tracker.Automation.PropertyLibrary.Element.RuntimeId,
-                                item.RuntimeId
-                            );
-                            var liveEl = windowEl.FindFirstDescendant(runtimeIdCond);
-                            if (liveEl != null)
+                            var windowRuntimeId = windowEl.Properties.RuntimeId.ValueOrDefault;
+                            if (item.RuntimeId != null && windowRuntimeId != null && Enumerable.SequenceEqual(windowRuntimeId, item.RuntimeId))
                             {
-                                targetEl = liveEl;
+                                targetEl = windowEl;
+                                resolveMethod = "RuntimeId (Window)";
+                                resolutionSteps.Add("Resolved as target window using RuntimeId");
+                            }
+                            else if (item.RuntimeId != null)
+                            {
+                                resolutionSteps.Add("RuntimeId (Window) check: Not matched");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            resolutionSteps.Add("RuntimeId (Window) check failed: " + ex.Message);
+                        }
+
+                        // 2. Try RuntimeId descendant search
+                        if (targetEl == item.Element && item.RuntimeId != null)
+                        {
+                            try
+                            {
+                                var runtimeIdCond = new FlaUI.Core.Conditions.PropertyCondition(
+                                    tracker.Automation.PropertyLibrary.Element.RuntimeId,
+                                    item.RuntimeId
+                                );
+                                var liveEl = windowEl.FindFirstDescendant(runtimeIdCond);
+                                if (liveEl != null)
+                                {
+                                    targetEl = liveEl;
+                                    resolveMethod = "RuntimeId";
+                                    resolutionSteps.Add("Resolved descendant using RuntimeId");
+                                }
+                                else
+                                {
+                                    resolutionSteps.Add("Descendant search by RuntimeId returned null");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                resolutionSteps.Add("Descendant search by RuntimeId failed: " + ex.Message);
                             }
                         }
 
+                        // 3. Try AutomationId search
                         if (targetEl == item.Element && !string.IsNullOrEmpty(item.AutomationId))
                         {
-                            var liveEl = windowEl.FindFirstDescendant(cf =>
-                                cf.ByAutomationId(item.AutomationId!).And(cf.ByControlType(item.ControlType))
-                            );
-                            if (liveEl != null)
+                            try
                             {
-                                targetEl = liveEl;
+                                var liveEl = windowEl.FindFirstDescendant(cf =>
+                                    cf.ByAutomationId(item.AutomationId!).And(cf.ByControlType(item.ControlType))
+                                );
+                                if (liveEl != null)
+                                {
+                                    targetEl = liveEl;
+                                    resolveMethod = "AutomationId";
+                                    resolutionSteps.Add("Resolved descendant using AutomationId");
+                                }
+                                else
+                                {
+                                    resolutionSteps.Add("Descendant search by AutomationId returned null");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                resolutionSteps.Add("Descendant search by AutomationId failed: " + ex.Message);
                             }
                         }
                     }
 
+                    // 4. Try FromPoint fallback
                     if (targetEl == item.Element)
                     {
-                        int x = item.Rect.Left + item.Rect.Width / 2;
-                        int y = item.Rect.Top + item.Rect.Height / 2;
-                        var liveEl = tracker.Automation.FromPoint(new Point(x, y));
-                        if (liveEl != null)
+                        try
                         {
-                            int livePid = 0;
-                            try { livePid = liveEl.Properties.ProcessId.ValueOrDefault; } catch { }
-
-                            bool isOverlay = (liveEl.Properties.NativeWindowHandle.ValueOrDefault == overlay.Handle) ||
-                                             (livePid == Process.GetCurrentProcess().Id);
-
-                            if (!isOverlay)
+                            int x = item.Rect.Left + item.Rect.Width / 2;
+                            int y = item.Rect.Top + item.Rect.Height / 2;
+                            var liveEl = tracker.Automation.FromPoint(new Point(x, y));
+                            if (liveEl != null)
                             {
-                                targetEl = liveEl;
+                                int livePid = 0;
+                                try { livePid = liveEl.Properties.ProcessId.ValueOrDefault; } catch { }
+
+                                bool isOverlay = (liveEl.Properties.NativeWindowHandle.ValueOrDefault == overlay.Handle) ||
+                                                 (livePid == Process.GetCurrentProcess().Id);
+
+                                if (!isOverlay)
+                                {
+                                    targetEl = liveEl;
+                                    resolveMethod = "FromPoint";
+                                    resolutionSteps.Add("Resolved using FromPoint");
+                                }
+                                else
+                                {
+                                    Console.WriteLine("CMD_RESPONSE:FromPoint hit overlay, ignoring.");
+                                    resolutionSteps.Add("FromPoint hit overlay, ignored");
+                                    resolveMethod = "FromPoint (Overlay Ignored, Cached Fallback)";
+                                }
                             }
                             else
                             {
-                                Console.WriteLine("FromPoint hit overlay, ignoring.");
+                                resolutionSteps.Add("FromPoint returned null");
+                                resolveMethod = "FromPoint (Null, Cached Fallback)";
                             }
+                        }
+                        catch (Exception ex)
+                        {
+                            resolutionSteps.Add("FromPoint failed: " + ex.Message);
+                            resolveMethod = "FromPoint (Failed, Cached Fallback)";
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine("Failed to resolve live element: " + ex.Message);
+                    resolutionSteps.Add("General resolution error: " + ex.Message);
+                    resolveMethod = "Error";
                 }
+
+                Console.WriteLine($"CMD_RESPONSE:Invoke: Resolved element using {resolveMethod}");
+                Console.WriteLine($"CMD_RESPONSE:Invoke: Resolution steps: {string.Join(" -> ", resolutionSteps)}");
 
                 string action = "Unknown";
                 try
@@ -542,6 +622,8 @@ static class Program
                     name = item.Name,
                     controlType = item.ControlType.ToString(),
                     action = action,
+                    resolveMethod = resolveMethod,
+                    resolutionSteps = resolutionSteps,
                     rect = new { x = item.Rect.X, y = item.Rect.Y, width = item.Rect.Width, height = item.Rect.Height }
                 };
                 Console.WriteLine("CMD_RESPONSE:" + JsonConvert.SerializeObject(logObj));
@@ -606,7 +688,7 @@ static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Failed to get ControlType: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Failed to get ControlType: " + ex.Message);
         }
 
         try
@@ -622,7 +704,7 @@ static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Failed to get BoundingRectangle: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Failed to get BoundingRectangle: " + ex.Message);
         }
 
         if (controlType == ControlType.Edit || controlType == ControlType.Document)
@@ -639,10 +721,10 @@ static class Program
             return "InvokePattern";
         }
 
-        if (TrySelectionPattern(el))
-        {
-            return "SelectionPattern";
-        }
+        // if (TrySelectionPattern(el))
+        // {
+        //     return "SelectionPattern";
+        // }
 
         if (TryTogglePattern(el))
         {
@@ -654,10 +736,10 @@ static class Program
             return "ExpandCollapsePattern";
         }
 
-        if (TryLegacyDefaultAction(el))
-        {
-            return "LegacyDefaultAction";
-        }
+        // if (TryLegacyDefaultAction(el))
+        // {
+        //     return "LegacyDefaultAction";
+        // }
 
         try
         {
@@ -672,20 +754,20 @@ static class Program
 
             if (requiresDoubleClick)
             {
-                Console.WriteLine($"SmartInvoke: Fallback Double Click at ({x}, {y}) for {controlType}");
+                Console.WriteLine($"CMD_RESPONSE:SmartInvoke: Fallback Double Click at ({x}, {y}) for {controlType}");
                 DoubleClickAt(x, y);
                 return "FallbackDoubleClick";
             }
             else
             {
-                Console.WriteLine($"SmartInvoke: Fallback Click at ({x}, {y}) for {controlType}");
+                Console.WriteLine($"CMD_RESPONSE:SmartInvoke: Fallback Click at ({x}, {y}) for {controlType}");
                 ClickAt(x, y);
                 return "FallbackClick";
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Fallback click failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Fallback click failed: " + ex.Message);
             return "Failed: " + ex.Message;
         }
     }
@@ -699,13 +781,13 @@ static class Program
                 return false;
             }
 
-            Console.WriteLine("SmartInvoke: Invoke pattern");
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Trying Invoke pattern...");
             el.Patterns.Invoke.Pattern.Invoke();
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("TryInvokePattern failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: TryInvokePattern failed: " + ex.Message);
             return false;
         }
     }
@@ -719,7 +801,7 @@ static class Program
                 return false;
             }
 
-            Console.WriteLine("SmartInvoke: SelectionItem pattern");
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Trying SelectionItem pattern...");
             el.Patterns.SelectionItem.Pattern.Select();
             try
             {
@@ -730,7 +812,7 @@ static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine("TrySelectionPattern failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: TrySelectionPattern failed: " + ex.Message);
             return false;
         }
     }
@@ -744,13 +826,13 @@ static class Program
                 return false;
             }
 
-            Console.WriteLine("SmartInvoke: Toggle pattern");
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Trying Toggle pattern...");
             el.Patterns.Toggle.Pattern.Toggle();
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("TryTogglePattern failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: TryTogglePattern failed: " + ex.Message);
             return false;
         }
     }
@@ -764,7 +846,7 @@ static class Program
                 return false;
             }
 
-            Console.WriteLine("SmartInvoke: ExpandCollapse pattern");
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Trying ExpandCollapse pattern...");
             var pattern = el.Patterns.ExpandCollapse.Pattern;
             var state = pattern.ExpandCollapseState.Value;
             if (state == ExpandCollapseState.Collapsed)
@@ -779,7 +861,7 @@ static class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine("TryExpandCollapsePattern failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: TryExpandCollapsePattern failed: " + ex.Message);
             return false;
         }
     }
@@ -793,19 +875,21 @@ static class Program
                 return false;
             }
 
-            Console.WriteLine("SmartInvoke: LegacyIAccessible pattern");
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: Trying LegacyIAccessible pattern...");
             el.Patterns.LegacyIAccessible.Pattern.DoDefaultAction();
             return true;
         }
         catch (Exception ex)
         {
-            Console.WriteLine("TryLegacyDefaultAction failed: " + ex.Message);
+            Console.WriteLine("CMD_RESPONSE:SmartInvoke: TryLegacyDefaultAction failed: " + ex.Message);
             return false;
         }
     }
 
     static void ClickAt(int x, int y)
     {
+        Mouse.Position = new Point(x, y);
+        System.Threading.Thread.Sleep(150);
         Mouse.LeftClick(new Point(x, y));
     }
 
@@ -828,6 +912,8 @@ static class Program
 
     static void DoubleClickAt(int x, int y)
     {
+        Mouse.Position = new Point(x, y);
+        System.Threading.Thread.Sleep(150);
         Mouse.LeftDoubleClick(new Point(x, y));
     }
 

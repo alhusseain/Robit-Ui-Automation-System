@@ -4,8 +4,8 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- uiAccess="true" allows our overlay to sit above secure/system windows like the touch keyboard -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
+        <!-- uiAccess="false" allows running the app locally without elevation (though overlay won't cover system windows like the touch keyboard) -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
