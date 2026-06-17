@@ -253,15 +253,10 @@ internal class UiTracker
 
             try
             {
-                var desktop = _automation.GetDesktop();
-                if (desktop != null)
+                IntPtr keyboardHwnd = FindWindowEx(IntPtr.Zero, IntPtr.Zero, "IPTip_Main_Window", null);
+                if (keyboardHwnd != IntPtr.Zero)
                 {
-                    var keyboard = desktop.FindFirst(TreeScope.Children, _automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
-                    if (keyboard == null)
-                    {
-                        keyboard = desktop.FindFirst(TreeScope.Descendants, _automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
-                    }
-
+                    var keyboard = _automation.FromHandle(keyboardHwnd);
                     if (keyboard != null)
                     {
                         var elements = _traverser.Traverse(keyboard);

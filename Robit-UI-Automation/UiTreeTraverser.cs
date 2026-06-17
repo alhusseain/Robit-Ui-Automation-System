@@ -16,6 +16,9 @@ internal class UiTreeTraverser
     [DllImport("user32.dll")]
     private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
@@ -183,28 +186,30 @@ internal class UiTreeTraverser
                 isTouchKeyboard = true;
                 if (diagnostics != null)
                 {
-                    diagnostics.AddLog(0, "Touch Keyboard window detected. Resolving real UWP keyboard UIA element from Desktop descendants...");
+                    diagnostics.AddLog(0, "Touch Keyboard window detected. Resolving real UWP keyboard UIA element...");
                 }
 
                 try
                 {
-                    var desktop = rootElement.Automation.GetDesktop();
-                    if (desktop != null)
+                    if (className == "IPTip_Main_Window")
                     {
-                        var keyboard = desktop.FindFirst(TreeScope.Children, rootElement.Automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
-                        if (keyboard == null)
+                        hwnd = IntPtr.Zero; // Bypass regular HWND visibility/caching
+                    }
+                    else
+                    {
+                        IntPtr keyboardHwnd = FindWindowEx(IntPtr.Zero, IntPtr.Zero, "IPTip_Main_Window", null);
+                        if (keyboardHwnd != IntPtr.Zero)
                         {
-                            keyboard = desktop.FindFirst(TreeScope.Descendants, rootElement.Automation.ConditionFactory.ByClassName("IPTip_Main_Window"));
-                        }
-
-                        if (keyboard != null)
-                        {
-                            if (diagnostics != null)
+                            var keyboard = rootElement.Automation.FromHandle(keyboardHwnd);
+                            if (keyboard != null)
                             {
-                                diagnostics.AddLog(1, "Successfully resolved real UWP keyboard UIA element. Swapping rootElement and performing direct raw descendant traversal.");
+                                if (diagnostics != null)
+                                {
+                                    diagnostics.AddLog(1, "Successfully resolved real UWP keyboard UIA element via FindWindowEx. Swapping rootElement and performing direct raw descendant traversal.");
+                                }
+                                rootElement = keyboard;
+                                hwnd = IntPtr.Zero; // Bypass regular HWND visibility/caching
                             }
-                            rootElement = keyboard;
-                            hwnd = IntPtr.Zero; // Bypass regular HWND visibility/caching
                         }
                     }
                 }
