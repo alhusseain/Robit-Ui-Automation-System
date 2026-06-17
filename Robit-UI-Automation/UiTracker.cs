@@ -39,6 +39,9 @@ internal class UiTracker
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out bool pvAttribute, int cbAttribute);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
     private const int DWMWA_CLOAKED = 14;
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
@@ -46,8 +49,33 @@ internal class UiTracker
     [DllImport("user32.dll")]
     private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
+    private static bool IsTouchKeyboardWindow(IntPtr hwnd)
+    {
+        try
+        {
+            var className = new StringBuilder(256);
+            if (GetClassName(hwnd, className, className.Capacity) > 0)
+            {
+                var cls = className.ToString();
+                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            var title = GetWindowTitle(hwnd);
+            if (title.Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private static bool IsWindowCloaked(IntPtr hwnd)
     {
+        if (IsTouchKeyboardWindow(hwnd)) return false;
         try
         {
             int hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out bool isCloaked, Marshal.SizeOf<bool>());
@@ -174,27 +202,7 @@ internal class UiTracker
 
         try
         {
-            var windowHandles = new List<IntPtr>();
-            EnumWindows((hwnd, lParam) =>
-            {
-                try
-                {
-                    if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
-                    {
-                        if (Native.GetWindowRect(hwnd, out var rect))
-                        {
-                            int width = rect.Right - rect.Left;
-                            int height = rect.Bottom - rect.Top;
-                            if (width > 0 && height > 0)
-                            {
-                                windowHandles.Add(hwnd);
-                            }
-                        }
-                    }
-                }
-                catch { }
-                return true;
-            }, IntPtr.Zero);
+            var windowHandles = GetVisibleWindowHandles();
 
             var windows = new List<AutomationElement>();
             foreach (var hwnd in windowHandles)
@@ -269,6 +277,32 @@ internal class UiTracker
         var builder = new StringBuilder(len + 1);
         GetWindowText(hwnd, builder, builder.Capacity);
         return builder.ToString();
+    }
+
+    internal static List<IntPtr> GetVisibleWindowHandles()
+    {
+        var windowHandles = new List<IntPtr>();
+        EnumWindows((hwnd, lParam) =>
+        {
+            try
+            {
+                if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
+                {
+                    if (Native.GetWindowRect(hwnd, out var rect))
+                    {
+                        int width = rect.Right - rect.Left;
+                        int height = rect.Bottom - rect.Top;
+                        if (width > 0 && height > 0)
+                        {
+                            windowHandles.Add(hwnd);
+                        }
+                    }
+                }
+            }
+            catch { }
+            return true;
+        }, IntPtr.Zero);
+        return windowHandles;
     }
 
     private static bool NearlySameRect(Rectangle a, Rectangle b)

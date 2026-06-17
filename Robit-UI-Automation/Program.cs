@@ -25,9 +25,79 @@ static class Program
     static List<CachedElement> lastClosest = new List<CachedElement>();
     static bool suppressTestMouseClick;
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
+        // Parse arguments for diagnostics
+        bool isDiagnose = false;
+        string? filterName = null;
+        IntPtr filterHwnd = IntPtr.Zero;
+        int filterPid = -1;
+        bool listOnly = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            var arg = args[i].ToLowerInvariant();
+            if (arg == "--diagnose" || arg == "diagnose")
+            {
+                isDiagnose = true;
+            }
+            else if (arg == "--name" || arg == "-n")
+            {
+                isDiagnose = true;
+                if (i + 1 < args.Length)
+                {
+                    filterName = args[++i];
+                }
+            }
+            else if (arg == "--id" || arg == "-id")
+            {
+                isDiagnose = true;
+                if (i + 1 < args.Length)
+                {
+                    string idVal = args[++i];
+                    try
+                    {
+                        if (idVal.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                        {
+                            filterHwnd = new IntPtr(Convert.ToInt64(idVal, 16));
+                        }
+                        else
+                        {
+                            filterHwnd = new IntPtr(Convert.ToInt64(idVal));
+                        }
+                    }
+                    catch
+                    {
+                        Console.WriteLine($"Invalid window ID / HWND: '{idVal}'");
+                    }
+                }
+            }
+            else if (arg == "--pid" || arg == "-p")
+            {
+                isDiagnose = true;
+                if (i + 1 < args.Length)
+                {
+                    string pidVal = args[++i];
+                    int.TryParse(pidVal, out filterPid);
+                }
+            }
+            else if (arg == "--list" || arg == "-l")
+            {
+                isDiagnose = true;
+                listOnly = true;
+            }
+        }
+
+        if (isDiagnose)
+        {
+            RunDiagnostics(filterName, filterHwnd, filterPid, listOnly);
+            return;
+        }
+
         settings = AppSettings.Load();
 
         if (settings.InputMode == "io")
@@ -61,6 +131,151 @@ static class Program
         }
 
         Application.Run();
+    }
+
+    static void RunDiagnostics(string? filterName, IntPtr filterHwnd, int filterPid, bool listOnly)
+    {
+        Console.WriteLine("=== UI Automation Diagnostic Mode ===");
+        var allWindows = UiTracker.GetVisibleWindowHandles();
+
+        var matched = new List<(IntPtr Hwnd, string Title, uint ProcessId, string ProcessName)>();
+        foreach (var hwnd in allWindows)
+        {
+            string title = UiTracker.GetWindowTitle(hwnd);
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            string procName = "[unknown]";
+            try
+            {
+                using (var proc = Process.GetProcessById((int)pid))
+                {
+                    procName = proc.ProcessName;
+                }
+            }
+            catch {}
+
+            bool isMatch = true;
+            if (filterHwnd != IntPtr.Zero && hwnd != filterHwnd)
+            {
+                isMatch = false;
+            }
+            if (filterPid != -1 && (int)pid != filterPid)
+            {
+                isMatch = false;
+            }
+            if (!string.IsNullOrEmpty(filterName) && title.IndexOf(filterName, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                isMatch = false;
+            }
+
+            if (isMatch)
+            {
+                matched.Add((hwnd, title, pid, procName));
+            }
+        }
+
+        if (listOnly)
+        {
+            Console.WriteLine($"Found {matched.Count} visible windows:");
+            foreach (var item in matched)
+            {
+                Console.WriteLine($"- HWND: 0x{item.Hwnd.ToInt64():X8} (Dec: {item.Hwnd.ToInt64()}) | PID: {item.ProcessId,-6} | Proc: {item.ProcessName,-20} | Title: '{item.Title}'");
+            }
+            return;
+        }
+
+        if (matched.Count == 0)
+        {
+            Console.WriteLine("No windows matched the specified filters.");
+            Console.WriteLine("\nAvailable visible windows:");
+            foreach (var hwnd in allWindows)
+            {
+                string title = UiTracker.GetWindowTitle(hwnd);
+                GetWindowThreadProcessId(hwnd, out uint pid);
+                string procName = "[unknown]";
+                try
+                {
+                    using (var proc = Process.GetProcessById((int)pid))
+                    {
+                        procName = proc.ProcessName;
+                    }
+                }
+                catch {}
+                Console.WriteLine($"- HWND: 0x{hwnd.ToInt64():X8} (Dec: {hwnd.ToInt64()}) | PID: {pid,-6} | Proc: {procName,-20} | Title: '{title}'");
+            }
+            return;
+        }
+
+        if (matched.Count > 1)
+        {
+            Console.WriteLine($"Warning: Multiple windows ({matched.Count}) matched the filter. Selecting the first one.");
+            Console.WriteLine("Matching windows:");
+            foreach (var item in matched)
+            {
+                Console.WriteLine($"- HWND: 0x{item.Hwnd.ToInt64():X8} (Dec: {item.Hwnd.ToInt64()}) | PID: {item.ProcessId,-6} | Title: '{item.Title}'");
+            }
+            Console.WriteLine();
+        }
+
+        var target = matched[0];
+        Console.WriteLine($"Target Window:");
+        Console.WriteLine($"  HWND: 0x{target.Hwnd.ToInt64():X8} (Dec: {target.Hwnd.ToInt64()})");
+        Console.WriteLine($"  Process ID: {target.ProcessId} ({target.ProcessName})");
+        Console.WriteLine($"  Title: '{target.Title}'");
+        Console.WriteLine("\nInitializing FlaUI Automation...");
+
+        try
+        {
+            using (var automation = new FlaUI.UIA3.UIA3Automation())
+            {
+                var rootElement = automation.FromHandle(target.Hwnd);
+                if (rootElement == null)
+                {
+                    Console.WriteLine("Error: Could not obtain root AutomationElement from the window handle.");
+                    return;
+                }
+
+                Console.WriteLine("Running tree traversal diagnostics...");
+                var diagnostics = new TreeTraversalDiagnostics();
+                var traverser = new UiTreeTraverser(measureVisibility: false);
+
+                var selected = traverser.Traverse(rootElement, diagnostics);
+
+                Console.WriteLine("\n=================== TRAVERSAL LOG ===================");
+                Console.Write(diagnostics.Log.ToString());
+                Console.WriteLine("=====================================================");
+
+                Console.WriteLine("\n================ SELECTED ELEMENTS ================");
+                if (selected.Count == 0)
+                {
+                    Console.WriteLine("No elements were selected.");
+                }
+                else
+                {
+                    for (int i = 0; i < selected.Count; i++)
+                    {
+                        var el = selected[i];
+                        Console.WriteLine($"{i + 1}: {el.ControlType} '{el.Name}'");
+                        Console.WriteLine($"   AutomationId: '{el.AutomationId}'");
+                        Console.WriteLine($"   Rect: X={el.Rect.X}, Y={el.Rect.Y}, W={el.Rect.Width}, H={el.Rect.Height}");
+                        Console.WriteLine($"   HWND: 0x{el.Hwnd.ToInt64():X}");
+                        if (el.RuntimeId != null)
+                        {
+                            Console.WriteLine($"   RuntimeId: [{string.Join(", ", el.RuntimeId)}]");
+                        }
+                        Console.WriteLine();
+                    }
+                }
+                Console.WriteLine("=====================================================");
+
+                Console.WriteLine("\n=== Summary ===");
+                Console.WriteLine($"Total Visited/Traversed Elements: {diagnostics.VisitedCount}");
+                Console.WriteLine($"Total Selected Elements:          {diagnostics.SelectedCount}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Diagnostics run failed: {ex}");
+        }
     }
 
     static void SetupTestMode()
@@ -202,7 +417,7 @@ static class Program
                 height = c.Rect.Height,
                 processId = c.ProcessId,
                 windowTitle = UiTracker.GetWindowTitle(c.Hwnd),
-                hwnd = c.Hwnd.ToInt64(),
+                hwnd = c.Hwnd.ToInt64().ToString(),
                 offScreen = c.IsOffscreen || IsOffScreen(c.Rect)
             }).ToArray()
         };
@@ -229,6 +444,19 @@ static class Program
 
             var item = lastClosest[index];
 
+            if (item.Hwnd != IntPtr.Zero)
+            {
+                try
+                {
+                    ShowWindow(item.Hwnd, SW_RESTORE);
+                    SetForegroundWindow(item.Hwnd);
+                    System.Threading.Thread.Sleep(150);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("CMD_RESPONSE:FailedToActivateWindow: " + ex.Message);
+                }
+            }
 
             try
             {
@@ -298,7 +526,15 @@ static class Program
                     Console.WriteLine("Failed to resolve live element: " + ex.Message);
                 }
 
-                string action = SmartInvoke(targetEl, item.Rect);
+                string action = "Unknown";
+                try
+                {
+                    action = SmartInvoke(targetEl, item.Rect);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("CMD_RESPONSE:SmartInvokeError: " + ex.ToString());
+                }
 
                 var logObj = new {
                     type = "invoked",
@@ -578,6 +814,14 @@ static class Program
 
     [DllImport("user32.dll")]
     static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    const int SW_RESTORE = 9;
 
     const uint LEFTDOWN = 0x02;
     const uint LEFTUP = 0x04;

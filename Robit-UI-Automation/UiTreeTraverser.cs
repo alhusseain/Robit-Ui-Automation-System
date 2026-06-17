@@ -19,6 +19,12 @@ internal class UiTreeTraverser
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
 
@@ -162,7 +168,7 @@ internal class UiTreeTraverser
     /// <summary>
     /// Traverses the subtree of a window and retrieves visible target elements.
     /// </summary>
-    public List<CachedElement> Traverse(AutomationElement rootElement)
+    public List<CachedElement> Traverse(AutomationElement rootElement, TreeTraversalDiagnostics? diagnostics = null)
     {
         var result = new List<CachedElement>();
         try
@@ -171,9 +177,25 @@ internal class UiTreeTraverser
             var hwnd = rootElement.Properties.NativeWindowHandle.ValueOrDefault;
             if (hwnd != IntPtr.Zero)
             {
-                // Prune if window is minimized, hidden, cloaked, or completely covered
-                if (!IsWindowVisibleSimple(hwnd) || IsWindowCloaked(hwnd) || IsWindowCovered(hwnd))
+                bool isVisibleSimple = IsWindowVisibleSimple(hwnd);
+                bool isCloaked = IsWindowCloaked(hwnd);
+                bool isCovered = IsWindowCovered(hwnd);
+
+                if (diagnostics != null)
                 {
+                    diagnostics.AddLog(0, $"Root Window (HWND: {hwnd.ToInt64():X}, Title: '{UiTracker.GetWindowTitle(hwnd)}')");
+                    diagnostics.AddLog(1, $"IsWindowVisibleSimple: {isVisibleSimple}");
+                    diagnostics.AddLog(1, $"IsWindowCloaked: {isCloaked}");
+                    diagnostics.AddLog(1, $"IsWindowCovered: {isCovered}");
+                }
+
+                // Prune if window is minimized, hidden, cloaked, or completely covered
+                if (!isVisibleSimple || isCloaked || isCovered)
+                {
+                    if (diagnostics != null)
+                    {
+                        diagnostics.AddLog(1, "Root Window pruned: failed visibility/cloak/cover check.");
+                    }
                     return result;
                 }
 
@@ -200,9 +222,20 @@ internal class UiTreeTraverser
                 if (cachedRoot != null)
                 {
                     var children = cachedRoot.CachedChildren;
+                    if (diagnostics != null)
+                    {
+                        diagnostics.AddLog(1, $"Starting traversal on {children.Length} cached children...");
+                    }
                     foreach (var child in children)
                     {
-                        TraverseRecursive(child, hwnd, hwnd, 1, result, isExplorer, false);
+                        TraverseRecursive(child, hwnd, hwnd, 1, result, isExplorer, false, diagnostics);
+                    }
+                }
+                else
+                {
+                    if (diagnostics != null)
+                    {
+                        diagnostics.AddLog(1, "Failed to get cachedRoot from handle.");
                     }
                 }
             }
@@ -210,6 +243,10 @@ internal class UiTreeTraverser
         catch (Exception ex)
         {
             Console.WriteLine($"Traversal failed at root: {ex.Message}");
+            if (diagnostics != null)
+            {
+                diagnostics.AddLog(0, $"Traversal failed at root with exception: {ex.Message}");
+            }
         }
         return result;
     }
@@ -221,13 +258,33 @@ internal class UiTreeTraverser
         int depth, 
         List<CachedElement> result,
         bool isExplorer,
-        bool insideListItem)
+        bool insideListItem,
+        TreeTraversalDiagnostics? diagnostics)
     {
-        if (depth > 50) return; // Prevent stack overflow on extremely deep trees
+        if (diagnostics != null)
+        {
+            diagnostics.VisitedCount++;
+        }
+
+        if (depth > 50)
+        {
+            if (diagnostics != null)
+            {
+                diagnostics.AddLog(depth, "Pruned subtree: recursion depth limit of 50 exceeded");
+            }
+            return; // Prevent stack overflow on extremely deep trees
+        }
 
         try
         {
             var controlType = element.ControlType;
+            var name = element.Properties.Name.ValueOrDefault ?? "[No Name]";
+            var autoId = element.Properties.AutomationId.ValueOrDefault ?? "";
+            
+            if (diagnostics != null)
+            {
+                diagnostics.AddLog(depth, $"Element: {controlType} '{name}' (AutoId: '{autoId}')");
+            }
 
             // Check if this element has its own native window handle (HWND)
             // If the window/control itself is hidden or minimized, prune its subtree.
@@ -248,36 +305,62 @@ internal class UiTreeTraverser
                 elementHwnd = element.Properties.NativeWindowHandle.ValueOrDefault;
                 if (elementHwnd != IntPtr.Zero)
                 {
-                    if (!IsWindowVisible(elementHwnd) || IsIconic(elementHwnd))
+                    bool isVisible = IsWindowVisible(elementHwnd);
+                    bool isIconic = IsIconic(elementHwnd);
+                    if (diagnostics != null)
                     {
+                        diagnostics.AddLog(depth + 1, $"Container HWND check: {elementHwnd.ToInt64():X} - IsVisible: {isVisible}, IsIconic: {isIconic}");
+                    }
+                    if (!isVisible || isIconic)
+                    {
+                        if (diagnostics != null)
+                        {
+                            diagnostics.AddLog(depth + 1, "Pruned subtree: container window is invisible or iconic (minimized)");
+                        }
                         return; // Prune hidden/minimized child windows (e.g. inactive tabs)
                     }
                 }
             }
 
-            // 2. Collect if it matches target controls
-            if (TargetControlTypes.Contains(controlType))
+            bool isTarget = TargetControlTypes.Contains(controlType);
+            bool isInteractiveEdit = true;
+            string? editSkipReason = null;
+
+            if (isTarget)
             {
                 // Special filter for Edit and Document controls to avoid clashing with non-interactive text elements
-                bool isInteractiveEdit = true;
                 if (controlType == ControlType.Edit || controlType == ControlType.Document)
                 {
-                    var autoId = element.Properties.AutomationId.ValueOrDefault;
                     bool isSystemField = autoId != null && autoId.StartsWith("System.", StringComparison.OrdinalIgnoreCase);
+                    bool isExplorerListItem = isExplorer && insideListItem;
+                    bool isEnabled = element.Properties.IsEnabled.ValueOrDefault;
+                    bool isKeyboardFocusable = element.Properties.IsKeyboardFocusable.ValueOrDefault;
 
                     isInteractiveEdit = !isSystemField && 
-                                         !(isExplorer && insideListItem) &&
-                                         element.Properties.IsEnabled.ValueOrDefault && 
-                                         element.Properties.IsKeyboardFocusable.ValueOrDefault;
+                                         !isExplorerListItem &&
+                                         isEnabled && 
+                                         isKeyboardFocusable;
+
+                    if (!isInteractiveEdit)
+                    {
+                        editSkipReason = $"Failed Edit/Document check - IsSystemField: {isSystemField}, IsExplorerListItem: {isExplorerListItem}, IsEnabled: {isEnabled}, IsKeyboardFocusable: {isKeyboardFocusable}";
+                    }
                 }
 
                 if (isInteractiveEdit)
                 {
                     var rect = element.BoundingRectangle;
-                    if (!rect.IsEmpty && rect.Width > 0 && rect.Height > 0)
+                    if (rect.IsEmpty || rect.Width <= 0 || rect.Height <= 0)
+                    {
+                        if (diagnostics != null)
+                        {
+                            diagnostics.AddLog(depth + 1, $"Skipped collection: Bounding rectangle is empty or invalid ({rect.Width}x{rect.Height})");
+                        }
+                    }
+                    else
                     {
                         var ownerHwnd = elementHwnd != IntPtr.Zero ? elementHwnd : parentHwnd;
-                        var name = element.Properties.Name.ValueOrDefault ?? "[No Name]";
+                        var elName = element.Properties.Name.ValueOrDefault ?? "[No Name]";
 
                         GetWindowThreadProcessId(ownerHwnd, out uint pid);
                         var cached = new CachedElement
@@ -285,7 +368,7 @@ internal class UiTreeTraverser
                             Element = element,
                             Rect = rect,
                             Hwnd = ownerHwnd,
-                            Name = name,
+                            Name = elName,
                             ControlType = controlType,
                             ProcessId = pid,
                             IsOffscreen = element.Properties.IsOffscreen.ValueOrDefault,
@@ -293,17 +376,65 @@ internal class UiTreeTraverser
                             RuntimeId = element.Properties.RuntimeId.ValueOrDefault
                         };
 
-                        if (IsActuallyVisible(cached))
+                        if (cached.IsOffscreen)
                         {
-                            result.Add(cached);
+                            if (diagnostics != null)
+                            {
+                                diagnostics.AddLog(depth + 1, "Skipped collection: Element is offscreen according to IsOffscreen property");
+                            }
+                        }
+                        else
+                        {
+                            var visDetails = new StringBuilder();
+                            bool isVisible = IsActuallyVisible(cached, visDetails);
+
+                            if (diagnostics != null)
+                            {
+                                diagnostics.AddLog(depth + 1, $"Visibility hit-test details:\n{visDetails.ToString().TrimEnd()}");
+                            }
+
+                            if (isVisible)
+                            {
+                                if (diagnostics != null)
+                                {
+                                    diagnostics.AddLog(depth + 1, $"[SELECTED] Rect: {rect.X},{rect.Y},{rect.Width},{rect.Height}");
+                                    diagnostics.SelectedCount++;
+                                }
+                                result.Add(cached);
+                            }
+                            else
+                            {
+                                if (diagnostics != null)
+                                {
+                                    diagnostics.AddLog(depth + 1, "Skipped collection: Failed visibility hit-test checks");
+                                }
+                            }
                         }
                     }
+                }
+                else
+                {
+                    if (diagnostics != null)
+                    {
+                        diagnostics.AddLog(depth + 1, $"Skipped collection: {editSkipReason}");
+                    }
+                }
+            }
+            else
+            {
+                if (diagnostics != null)
+                {
+                    diagnostics.AddLog(depth + 1, "Skipped collection: Not a target control type");
                 }
             }
 
             // 3. Prune child traversal if it's a leaf node type
             if (LeafControlTypes.Contains(controlType))
             {
+                if (diagnostics != null)
+                {
+                    diagnostics.AddLog(depth + 1, "Pruned child traversal: Element is a leaf control type");
+                }
                 return;
             }
 
@@ -314,6 +445,11 @@ internal class UiTreeTraverser
                                     controlType == ControlType.TreeItem;
 
             bool nextInsideListItem = insideListItem || isListOrDataItem;
+
+            if (diagnostics != null && children.Length > 0)
+            {
+                diagnostics.AddLog(depth + 1, $"Traversing {children.Length} children...");
+            }
 
             foreach (var child in children)
             {
@@ -337,13 +473,48 @@ internal class UiTreeTraverser
                 if (childHwnd == IntPtr.Zero)
                     childHwnd = parentHwnd;
 
-                TraverseRecursive(child, windowHwnd, childHwnd, depth + 1, result, isExplorer, nextInsideListItem);
+                TraverseRecursive(child, windowHwnd, childHwnd, depth + 1, result, isExplorer, nextInsideListItem, diagnostics);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Silent catch
+            if (diagnostics != null)
+            {
+                diagnostics.AddLog(depth, $"Exception in TraverseRecursive: {ex.Message}");
+            }
         }
+    }
+
+    private bool IsTouchKeyboardWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        try
+        {
+            var className = new StringBuilder(256);
+            if (GetClassName(hwnd, className, className.Capacity) > 0)
+            {
+                var cls = className.ToString();
+                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            int len = GetWindowTextLength(hwnd);
+            if (len > 0)
+            {
+                var title = new StringBuilder(len + 1);
+                if (GetWindowText(hwnd, title, title.Capacity) > 0)
+                {
+                    if (title.ToString().Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        catch { }
+        return false;
     }
 
     /// <summary>
@@ -352,6 +523,7 @@ internal class UiTreeTraverser
     private bool IsWindowVisibleSimple(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return false;
+        if (IsTouchKeyboardWindow(hwnd)) return true;
         if (IsIconic(hwnd)) return false;
         if (!IsWindowVisible(hwnd)) return false;
         return true;
@@ -363,6 +535,7 @@ internal class UiTreeTraverser
     private bool IsWindowCloaked(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return false;
+        if (IsTouchKeyboardWindow(hwnd)) return false;
         try
         {
             int hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out bool isCloaked, Marshal.SizeOf<bool>());
@@ -384,6 +557,7 @@ internal class UiTreeTraverser
     private bool IsWindowCovered(IntPtr hwnd)
     {
         if (hwnd == IntPtr.Zero) return false;
+        if (IsTouchKeyboardWindow(hwnd)) return false;
         if (!GetWindowRect(hwnd, out RECT r)) return false;
 
         int width = r.Right - r.Left;
@@ -425,7 +599,7 @@ internal class UiTreeTraverser
     /// <summary>
     /// Checks if the cached element is actually visible via window-from-point testing.
     /// </summary>
-    public bool IsActuallyVisible(CachedElement cached)
+    public bool IsActuallyVisible(CachedElement cached, StringBuilder? details = null)
     {
         var sw = Stopwatch.StartNew();
 
@@ -435,10 +609,16 @@ internal class UiTreeTraverser
             var r = cached.Rect;
 
             if (r.IsEmpty)
+            {
+                details?.AppendLine("      - Failure: Bounding rectangle is empty");
                 return false;
+            }
 
             if (cached.IsOffscreen)
+            {
+                details?.AppendLine("      - Failure: IsOffscreen UIA property is true");
                 return false;
+            }
 
             var name = cached.Name;
             var controlType = cached.ControlType;
@@ -447,6 +627,13 @@ internal class UiTreeTraverser
                              controlType == ControlType.Button;
 
             var elHwnd = cached.Hwnd;
+
+            if (IsTouchKeyboardWindow(elHwnd))
+            {
+                details?.AppendLine("      - Touch keyboard window, returning visible=true");
+                sw.Stop();
+                return true;
+            }
 
             var points = new[]
             {
@@ -457,11 +644,25 @@ internal class UiTreeTraverser
 
             var elRoot = elHwnd != IntPtr.Zero ? GetAncestor(elHwnd, GA_ROOT) : IntPtr.Zero;
 
-            foreach (var p in points)
+            for (int i = 0; i < points.Length; i++)
             {
+                var p = points[i];
                 IntPtr hwnd = WindowFromPoint(p);
                 if (hwnd == IntPtr.Zero)
+                {
+                    details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit IntPtr.Zero");
                     continue;
+                }
+
+                string hitTitle = "";
+                string hitClass = "";
+                if (details != null)
+                {
+                    hitTitle = UiTracker.GetWindowTitle(hwnd);
+                    var className = new StringBuilder(256);
+                    GetClassName(hwnd, className, className.Capacity);
+                    hitClass = className.ToString();
+                }
 
                 bool isVisible = false;
 
@@ -470,10 +671,12 @@ internal class UiTreeTraverser
                     IntPtr pointRoot = GetAncestor(hwnd, GA_ROOT);
                     if (hwnd == elHwnd)
                     {
+                        details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit exact target HWND {elHwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}')");
                         isVisible = true;
                     }
                     else if (IsChild(hwnd, elHwnd))
                     {
+                        details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit child HWND {hwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}') of target HWND {elHwnd.ToInt64():X}");
                         isVisible = true;
                     }
                     else if (IsChild(elHwnd, hwnd))
@@ -483,6 +686,7 @@ internal class UiTreeTraverser
                         // might be overlaying/covering the parent window's browser UI elements.
                         // We check the class name of the window at the point to see if it is a viewport.
                         bool isMainRootWindow = GetAncestor(elHwnd, GA_ROOTOWNER) == elHwnd;
+                        details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit HWND {hwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}'). Target HWND {elHwnd.ToInt64():X} is parent window (isMainRootWindow={isMainRootWindow}).");
                         if (isMainRootWindow)
                         {
                             var className = new StringBuilder(256);
@@ -493,6 +697,7 @@ internal class UiTreeTraverser
                                                  cls.IndexOf("D3D", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                                  cls.IndexOf("Mozilla", StringComparison.OrdinalIgnoreCase) >= 0 ||
                                                  cls.IndexOf("Gecko", StringComparison.OrdinalIgnoreCase) >= 0;
+                                details?.AppendLine($"        * Viewport class check: '{cls}' (isViewport={isViewport})");
                                 if (!isViewport)
                                 {
                                     isVisible = true;
@@ -511,11 +716,21 @@ internal class UiTreeTraverser
                     else if (isMenuItem)
                     {
                         IntPtr root = GetAncestor(hwnd, GA_ROOT);
-                        if (IsMenuPopupVisible(root, elHwnd, elRoot))
+                        bool isMenuPop = IsMenuPopupVisible(root, elHwnd, elRoot);
+                        details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit HWND {hwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}'). MenuItem check: IsMenuPopupVisible={isMenuPop}");
+                        if (isMenuPop)
                         {
                             isVisible = true;
                         }
                     }
+                    else
+                    {
+                        details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Covered by HWND {hwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}')");
+                    }
+                }
+                else
+                {
+                    details?.AppendLine($"      - Point {i} ({p.X}, {p.Y}): Hit HWND {hwnd.ToInt64():X} (Title: '{hitTitle}', Class: '{hitClass}'), target has no HWND");
                 }
 
                 if (isVisible)
@@ -604,3 +819,17 @@ internal class UiTreeTraverser
         }
     }
 }
+
+internal class TreeTraversalDiagnostics
+{
+    public System.Text.StringBuilder Log { get; } = new System.Text.StringBuilder();
+    public int VisitedCount { get; set; }
+    public int SelectedCount { get; set; }
+
+    public void AddLog(int depth, string message)
+    {
+        string indent = new string(' ', depth * 2);
+        Log.AppendLine($"{indent}{message}");
+    }
+}
+
