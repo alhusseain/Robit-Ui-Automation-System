@@ -6,6 +6,7 @@ using System.Windows.Forms;
 
 public class OverlayForm : Form
 {
+    private const int GWL_EXSTYLE = -20;
     private const int WS_EX_LAYERED = 0x80000;
     private const int WS_EX_TRANSPARENT = 0x20;
     private const int WS_EX_NOACTIVATE = 0x08000000;
@@ -24,7 +25,6 @@ public class OverlayForm : Form
 
     public OverlayForm()
     {
-        // 🔥 CRITICAL: apply styles BEFORE handle creation
         SetStyle(ControlStyles.AllPaintingInWmPaint |
                  ControlStyles.OptimizedDoubleBuffer |
                  ControlStyles.UserPaint, true);
@@ -38,30 +38,48 @@ public class OverlayForm : Form
 
         WindowState = FormWindowState.Maximized;
 
-        // 🔥 prevent activation + click-through + layered window
-        Load += (s, e) =>
+        Shown += (s, e) => RefreshOverlayWindow();
+        VisibleChanged += (s, e) => RefreshOverlayWindow();
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
         {
-            int exStyle = Native.GetWindowLong(this.Handle, -20);
-
-            Native.SetWindowLong(this.Handle, -20,
-                exStyle |
-                WS_EX_LAYERED |
-                WS_EX_TRANSPARENT |
-                WS_EX_NOACTIVATE |
-                WS_EX_TOOLWINDOW
-            );
-
-            EnsureTopMost();
-            this.Invalidate();
-            this.Update();
-        };
+            var cp = base.CreateParams;
+            cp.ExStyle |= WS_EX_LAYERED |
+                          WS_EX_TRANSPARENT |
+                          WS_EX_NOACTIVATE |
+                          WS_EX_TOOLWINDOW;
+            return cp;
+        }
     }
 
     public void SetRects(List<(Rectangle Rect, int Index)> rects)
     {
         Rects = rects;
+        RefreshOverlayWindow();
+        Invalidate();
+    }
+
+    private void RefreshOverlayWindow()
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        int exStyle = Native.GetWindowLong(this.Handle, GWL_EXSTYLE);
+        Native.SetWindowLong(this.Handle, GWL_EXSTYLE,
+            exStyle |
+            WS_EX_LAYERED |
+            WS_EX_TRANSPARENT |
+            WS_EX_NOACTIVATE |
+            WS_EX_TOOLWINDOW);
+
         EnsureTopMost();
         Invalidate();
+        Update();
     }
 
     private void EnsureTopMost()

@@ -4,8 +4,8 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- uiAccess="false" allows running the app locally without elevation (though overlay won't cover system windows like the touch keyboard) -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <!-- uiAccess="true" lets the signed Program Files deployment draw above UIAccess windows such as TabTip. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="true" />
       </requestedPrivileges>
     </security>
   </trustInfo>
