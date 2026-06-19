@@ -60,7 +60,6 @@ internal static class TabTipManager
     private interface ITipInvocation { void Toggle(IntPtr hwnd); }
 
     private static DateTime _lastOpenTime = DateTime.MinValue;
-    public static volatile bool IsTransitioning = false;
 
     public static bool IsTouchKeyboardWindow(IntPtr hwnd)
     {
@@ -142,21 +141,75 @@ internal static class TabTipManager
 
     public static void Open()
     {
+        // Debounce/cooldown: prevent double-toggling in quick succession (1000ms threshold)
+        if ((DateTime.UtcNow - _lastOpenTime).TotalMilliseconds < 1000)
+        {
+            return;
+        }
+
+        // 1. Make sure TabTip.exe process is running first
         try
         {
-            IsTransitioning = true;
-
-            // Debounce/cooldown: prevent double-toggling in quick succession (1000ms threshold)
-            if ((DateTime.UtcNow - _lastOpenTime).TotalMilliseconds < 1000)
+            var processes = Process.GetProcessesByName("TabTip");
+            if (processes.Length == 0)
             {
+                string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), @"microsoft shared\ink\TabTip.exe");
+                if (!File.Exists(path))
+                {
+                    path = @"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe";
+                }
+
+                if (File.Exists(path))
+                {
+                    Console.WriteLine("[TabTip] Process not running. Pre-launching TabTip.exe...");
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = path,
+                        UseShellExecute = true
+                    });
+                    // Wait a bit for it to open and register COM classes
+                    System.Threading.Thread.Sleep(500);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TabTip] Error checking/pre-launching TabTip.exe process: {ex.Message}");
+        }
+
+        for (int i = 0; i < 5; i++)
+        {
+            // If the keyboard is already visible, do not toggle it (which would hide it)
+            if (IsTouchKeyboardVisible())
+            {
+                Console.WriteLine($"[TabTip] Open loop: Keyboard is now visible (attempt {i}).");
                 return;
             }
 
-            // 1. Make sure TabTip.exe process is running first
+            Console.WriteLine($"[TabTip] Open loop: Keyboard not visible. Toggling... (attempt {i + 1}/5)");
+
+            // Record the attempt time before triggering the toggle
+            _lastOpenTime = DateTime.UtcNow;
+
+            IntPtr hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
+            {
+                hwnd = GetDesktopWindow();
+            }
+
+            // 3. Try the ITipInvocation COM interface
             try
             {
-                var processes = Process.GetProcessesByName("TabTip");
-                if (processes.Length == 0)
+                var uiHost = new UIHostNoLaunch();
+                var tip = (ITipInvocation)uiHost;
+                tip.Toggle(hwnd);
+                Marshal.ReleaseComObject(uiHost);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TabTip] COM invocation failed: {ex.Message}. Falling back to Process.Start...");
+                // 4. Fallback: Kill and restart TabTip.exe to force it to show up
+                try
                 {
                     string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), @"microsoft shared\ink\TabTip.exe");
                     if (!File.Exists(path))
@@ -166,157 +219,85 @@ internal static class TabTipManager
 
                     if (File.Exists(path))
                     {
-                        Console.WriteLine("[TabTip] Process not running. Pre-launching TabTip.exe...");
+                        Console.WriteLine("[TabTip] COM failed. Restarting TabTip.exe to force show...");
+                        foreach (var proc in Process.GetProcessesByName("TabTip"))
+                        {
+                            try { proc.Kill(); } catch { }
+                        }
+                        System.Threading.Thread.Sleep(100);
                         Process.Start(new ProcessStartInfo
                         {
                             FileName = path,
                             UseShellExecute = true
                         });
-                        // Wait a bit for it to open and register COM classes
-                        System.Threading.Thread.Sleep(500);
                     }
                 }
+                catch (Exception ex2)
+                {
+                    Console.WriteLine($"[TabTip] Failed to start TabTip process: {ex2.Message}");
+                }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[TabTip] Error checking/pre-launching TabTip.exe process: {ex.Message}");
-            }
 
-            for (int i = 0; i < 5; i++)
-            {
-                // If the keyboard is already visible, do not toggle it (which would hide it)
-                if (IsTouchKeyboardVisible())
-                {
-                    Console.WriteLine($"[TabTip] Open loop: Keyboard is now visible (attempt {i}).");
-                    return;
-                }
-
-                Console.WriteLine($"[TabTip] Open loop: Keyboard not visible. Toggling... (attempt {i + 1}/5)");
-
-                // Record the attempt time before triggering the toggle
-                _lastOpenTime = DateTime.UtcNow;
-
-                IntPtr hwnd = GetForegroundWindow();
-                if (hwnd == IntPtr.Zero)
-                {
-                    hwnd = GetDesktopWindow();
-                }
-
-                // 3. Try the ITipInvocation COM interface
-                try
-                {
-                    var uiHost = new UIHostNoLaunch();
-                    var tip = (ITipInvocation)uiHost;
-                    tip.Toggle(hwnd);
-                    Marshal.ReleaseComObject(uiHost);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[TabTip] COM invocation failed: {ex.Message}. Falling back to Process.Start...");
-                    // 4. Fallback: Kill and restart TabTip.exe to force it to show up
-                    try
-                    {
-                        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonProgramFiles), @"microsoft shared\ink\TabTip.exe");
-                        if (!File.Exists(path))
-                        {
-                            path = @"C:\Program Files\Common Files\microsoft shared\ink\TabTip.exe";
-                        }
-
-                        if (File.Exists(path))
-                        {
-                            Console.WriteLine("[TabTip] COM failed. Restarting TabTip.exe to force show...");
-                            foreach (var proc in Process.GetProcessesByName("TabTip"))
-                            {
-                                try { proc.Kill(); } catch { }
-                            }
-                            System.Threading.Thread.Sleep(100);
-                            Process.Start(new ProcessStartInfo
-                            {
-                                FileName = path,
-                                UseShellExecute = true
-                            });
-                        }
-                    }
-                    catch (Exception ex2)
-                    {
-                        Console.WriteLine($"[TabTip] Failed to start TabTip process: {ex2.Message}");
-                    }
-                }
-
-                // Wait a bit before checking/toggling again
-                System.Threading.Thread.Sleep(200);
-            }
-        }
-        finally
-        {
-            IsTransitioning = false;
+            // Wait a bit before checking/toggling again
+            System.Threading.Thread.Sleep(200);
         }
     }
 
     public static void Close()
     {
-        try
+        // Debounce/cooldown: prevent double-toggling in quick succession (1000ms threshold)
+        if ((DateTime.UtcNow - _lastOpenTime).TotalMilliseconds < 1000)
         {
-            IsTransitioning = true;
+            return;
+        }
 
-            // Debounce/cooldown: prevent double-toggling in quick succession (1000ms threshold)
-            if ((DateTime.UtcNow - _lastOpenTime).TotalMilliseconds < 1000)
+        for (int i = 0; i < 5; i++)
+        {
+            // If the keyboard is already hidden, do not toggle it (which would open it)
+            if (!IsTouchKeyboardVisible())
             {
+                Console.WriteLine($"[TabTip] Close loop: Keyboard is now hidden (attempt {i}).");
                 return;
             }
 
-            for (int i = 0; i < 5; i++)
+            Console.WriteLine($"[TabTip] Close loop: Keyboard is still visible. Toggling... (attempt {i + 1}/5)");
+
+            // Record the attempt time before triggering the toggle
+            _lastOpenTime = DateTime.UtcNow;
+
+            IntPtr hwnd = GetForegroundWindow();
+            if (hwnd == IntPtr.Zero)
             {
-                // If the keyboard is already hidden, do not toggle it (which would open it)
-                if (!IsTouchKeyboardVisible())
-                {
-                    Console.WriteLine($"[TabTip] Close loop: Keyboard is now hidden (attempt {i}).");
-                    return;
-                }
+                hwnd = GetDesktopWindow();
+            }
 
-                Console.WriteLine($"[TabTip] Close loop: Keyboard is still visible. Toggling... (attempt {i + 1}/5)");
-
-                // Record the attempt time before triggering the toggle
-                _lastOpenTime = DateTime.UtcNow;
-
-                IntPtr hwnd = GetForegroundWindow();
-                if (hwnd == IntPtr.Zero)
-                {
-                    hwnd = GetDesktopWindow();
-                }
-
-                // Try the ITipInvocation COM interface
+            // Try the ITipInvocation COM interface
+            try
+            {
+                var uiHost = new UIHostNoLaunch();
+                var tip = (ITipInvocation)uiHost;
+                tip.Toggle(hwnd);
+                Marshal.ReleaseComObject(uiHost);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TabTip] COM close invocation failed: {ex.Message}. Falling back to killing process...");
+                // Fallback: Kill TabTip.exe process to force hide
                 try
                 {
-                    var uiHost = new UIHostNoLaunch();
-                    var tip = (ITipInvocation)uiHost;
-                    tip.Toggle(hwnd);
-                    Marshal.ReleaseComObject(uiHost);
+                    foreach (var proc in Process.GetProcessesByName("TabTip"))
+                    {
+                        try { proc.Kill(); } catch { }
+                    }
                 }
-                catch (Exception ex)
+                catch (Exception ex2)
                 {
-                    Console.WriteLine($"[TabTip] COM close invocation failed: {ex.Message}. Falling back to killing process...");
-                    // Fallback: Kill TabTip.exe process to force hide
-                    try
-                    {
-                        foreach (var proc in Process.GetProcessesByName("TabTip"))
-                        {
-                            try { proc.Kill(); } catch { }
-                        }
-                    }
-                    catch (Exception ex2)
-                    {
-                        Console.WriteLine($"[TabTip] Failed to kill TabTip process: {ex2.Message}");
-                    }
+                    Console.WriteLine($"[TabTip] Failed to kill TabTip process: {ex2.Message}");
                 }
-
-                // Wait a bit before checking/toggling again
-                System.Threading.Thread.Sleep(200);
             }
-        }
-        finally
-        {
-            IsTransitioning = false;
+
+            // Wait a bit before checking/toggling again
+            System.Threading.Thread.Sleep(200);
         }
     }
 }

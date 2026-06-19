@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "d:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj": {}
+    "D:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj": {}
   },
   "projects": {
-    "d:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj": {
+    "D:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "d:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj",
+        "projectUniqueName": "D:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj",
         "projectName": "Robit-UI-Automation",
-        "projectPath": "d:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj",
+        "projectPath": "D:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\Robit-UI-Automation.csproj",
         "packagesPath": "C:\\Users\\Asus\\.nuget\\packages\\",
-        "outputPath": "d:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\obj\\",
+        "outputPath": "D:\\Projects\\Robit Ui Automation System\\Robit-UI-Automation\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\Asus\\AppData\\Roaming\\NuGet\\NuGet.Config"
