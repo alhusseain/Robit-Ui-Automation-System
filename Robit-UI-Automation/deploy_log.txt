@@ -1,12 +1,12 @@
 ﻿**********************
 Windows PowerShell transcript start
-Start time: 20260618100042
+Start time: 20260619191200
 Username: ALHUSSEAIN\Asus
 RunAs User: ALHUSSEAIN\Asus
 Configuration Name: 
 Machine: ALHUSSEAIN (Microsoft Windows NT 10.0.26200.0)
-Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File d:\Projects\Robit Ui Automation System\Robit-UI-Automation\deploy_uiaccess.ps1
-Process ID: 23424
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 10760
 PSVersion: 5.1.26100.8655
 PSEdition: Desktop
 PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8655
@@ -18,9 +18,8 @@ SerializationVersion: 1.1.0.1
 **********************
 Transcript started, output file is d:\Projects\Robit Ui Automation System\Robit-UI-Automation\deploy_log.txt
 Building project in Release mode...
-Restore complete (0.4s)
-  Robit-UI-Automation net48 win-x86 succeeded with 17 warning(s) (0.3s) → d:\Projects\Robit Ui Automation System\Robit-U
-I-Automation\bin\Release\net48\Robit-UI-Automation.exe
+Restore complete (2.7s)
+  Robit-UI-Automation net48 win-x86 succeeded with 17 warning(s) (3.0s) → bin\Release\net48\Robit-UI-Automation.exe
     d:\Projects\Robit Ui Automation System\Robit-UI-Automation\CustomMetrics.cs(20,63): warning CS8625: Cannot convert n
 ull literal to non-nullable reference type.
     d:\Projects\Robit Ui Automation System\Robit-UI-Automation\CachedElement.cs(8,30): warning CS8618: Non-nullable fiel
@@ -29,22 +28,22 @@ d 'Element' must contain a non-null value when exiting constructor. Consider add
     d:\Projects\Robit Ui Automation System\Robit-UI-Automation\CachedElement.cs(11,19): warning CS8618: Non-nullable fie
 ld 'Name' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring t
 he field as nullable.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(110,12): warning CS8618: Non-nullable field
-'_overlay' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring
-the field as nullable.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTreeTraverser.cs(181,31): warning CS8600: Converting nu
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(64,12): warning CS8618: Non-nullable field '
+_overlay' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring t
+he field as nullable.
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTreeTraverser.cs(178,31): warning CS8600: Converting nu
 ll literal or possible null value to non-nullable type.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTreeTraverser.cs(200,107): warning CS8625: Cannot conve
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTreeTraverser.cs(197,107): warning CS8625: Cannot conve
 rt null literal to non-nullable reference type.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(256,99): warning CS8625: Cannot convert null
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(263,99): warning CS8625: Cannot convert null
  literal to non-nullable reference type.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(355,96): warning CS8625: Cannot convert null
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\UiTracker.cs(362,96): warning CS8625: Cannot convert null
  literal to non-nullable reference type.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(331,31): warning CS8600: Converting null liter
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(348,31): warning CS8600: Converting null liter
 al or possible null value to non-nullable type.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(332,31): warning CS8602: Dereference of a poss
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(349,31): warning CS8602: Dereference of a poss
 ibly null reference.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(469,50): warning CS8600: Converting null liter
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(485,50): warning CS8600: Converting null liter
 al or possible null value to non-nullable type.
     d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(18,22): warning CS8618: Non-nullable field 'tr
 acker' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring the
@@ -61,10 +60,10 @@ ttings' must contain a non-null value when exiting constructor. Consider adding 
     d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(23,26): warning CS8618: Non-nullable field 'ge
 tClosestMetrics' must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or decl
 aring the field as nullable.
-    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(997,20): warning CS8603: Possible null referen
-ce return.
+    d:\Projects\Robit Ui Automation System\Robit-UI-Automation\Program.cs(1016,20): warning CS8603: Possible null refere
+nce return.
 
-Build succeeded with 17 warning(s) in 1.1s
+Build succeeded with 17 warning(s) in 7.0s
 Using existing code-signing certificate: CN=RobitUiAutomationUIAccess
 Signing executable: d:\Projects\Robit Ui Automation System\Robit-UI-Automation\bin\Release\net48\Robit-UI-Automation.exe
 Executable signed successfully.
@@ -72,5 +71,5 @@ Deploying to secure system directory: C:\Program Files\RobitUiAutomation
 Deployment completed successfully!
 **********************
 Windows PowerShell transcript end
-End time: 20260618100045
+End time: 20260619191210
 **********************

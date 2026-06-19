@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using System.Text;
 using System.Threading;
+using System.IO;
 using System.Windows.Forms;
 
 using FlaUI.Core.AutomationElements;
@@ -36,14 +37,6 @@ internal class UiTracker
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hWnd);
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out bool pvAttribute, int cbAttribute);
-
-    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-
-    private const int DWMWA_CLOAKED = 14;
-
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -55,46 +48,6 @@ internal class UiTracker
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    private static bool IsTouchKeyboardWindow(IntPtr hwnd)
-    {
-        try
-        {
-            var className = new StringBuilder(256);
-            if (GetClassName(hwnd, className, className.Capacity) > 0)
-            {
-                var cls = className.ToString();
-                if (cls.Equals("IPTip_TextBox_Window", StringComparison.OrdinalIgnoreCase) ||
-                    cls.Equals("IPTip_Main_Window", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-
-            var title = GetWindowTitle(hwnd);
-            if (title.Equals("Microsoft Text Input Application", StringComparison.OrdinalIgnoreCase) ||
-                title.Equals("Windows Input Experience", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        catch { }
-        return false;
-    }
-
-    private static bool IsWindowCloaked(IntPtr hwnd)
-    {
-        if (IsTouchKeyboardWindow(hwnd)) return false;
-        try
-        {
-            int hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out bool isCloaked, Marshal.SizeOf<bool>());
-            return hr == 0 && isCloaked;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private UIA3Automation _automation;
     public UIA3Automation Automation => _automation;
     private volatile List<CachedElement> _elements = new List<CachedElement>();
@@ -104,29 +57,83 @@ internal class UiTracker
     private readonly UiTreeTraverser _traverser;
     private readonly bool _measureRefresh;
     private readonly bool _measureVisibility;
+    private readonly bool _focusOnly;
     private const int POLLING_MS = 500;
 
 
-    public UiTracker(bool measureRefresh, bool measureVisibility, bool enableWindowPolling)
+    public UiTracker(bool measureRefresh, bool measureVisibility, bool enableWindowPolling, bool focusOnly = false)
     {
         _automation = new UIA3Automation();
         _measureRefresh = measureRefresh;
         _measureVisibility = measureVisibility;
+        _focusOnly = focusOnly;
         _traverser = new UiTreeTraverser(measureVisibility);
 
-        _automation.RegisterFocusChangedEvent(el => TriggerRefresh());
-
-
-        Task.Run(async () =>
+        _automation.RegisterFocusChangedEvent(el =>
         {
-            while (true)
+            if (el != null)
             {
-                TriggerRefresh();
-                await Task.Delay(POLLING_MS);
+                try
+                {
+                    string name = "[unknown]";
+                    try { name = el.Name ?? "[none]"; } catch { }
+
+                    string controlType = "[unknown]";
+                    try { controlType = el.ControlType.ToString(); } catch { }
+
+                    int processId = 0;
+                    try { processId = el.Properties.ProcessId.ValueOrDefault; } catch { }
+
+                    if (TabTipManager.IsTouchKeyboardProcess(processId))
+                    {
+                        return;
+                    }
+
+                    string automationId = "[none]";
+                    try { automationId = el.AutomationId ?? "[none]"; } catch { }
+
+                    Console.WriteLine($"[FocusChanged] Element focused: Name='{name}', ControlType={controlType}, ProcessId={processId}, AutomationId='{automationId}'");
+
+                    bool isTypeable = IsTypeableElement(el);
+                    if (isTypeable)
+                    {
+                        System.Threading.Tasks.Task.Run(() =>
+                        {
+                            Thread.Sleep(500);
+                            Console.WriteLine($"[FocusChanged] Typeable element focused. Opening TabTip...");
+                            TabTipManager.Open();
+                            TriggerRefresh();
+                        });
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[FocusChanged] Non-typeable element focused. Closing TabTip...");
+                        TabTipManager.Close();
+                        TriggerRefresh();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[FocusChanged] Failed to log focused element details: {ex.Message}");
+                }
             }
+            TriggerRefresh();
         });
 
-        if (enableWindowPolling)
+
+        if (!_focusOnly)
+        {
+            Task.Run(async () =>
+            {
+                while (true)
+                {
+                    TriggerRefresh();
+                    await Task.Delay(POLLING_MS);
+                }
+            });
+        }
+
+        if (enableWindowPolling && !_focusOnly)
         {
             Task.Run(async () =>
             {
@@ -155,7 +162,7 @@ internal class UiTracker
             {
                 try
                 {
-                    if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
+                    if (IsWindowVisible(hwnd) && !IsIconic(hwnd))
                     {
                         if (Native.GetWindowRect(hwnd, out var rect))
                         {
@@ -185,7 +192,7 @@ internal class UiTracker
 
     private void TriggerRefresh()
     {
-        if (_isRefreshing) return;
+        if (_isRefreshing || TabTipManager.IsTransitioning) return;
         
         Task.Run(() => 
         {
@@ -234,7 +241,7 @@ internal class UiTracker
                 try
                 {
                     var hwnd = win.Properties.NativeWindowHandle.ValueOrDefault;
-                    if (IsTouchKeyboardWindow(hwnd))
+                    if (TabTipManager.IsTouchKeyboardWindow(hwnd))
                     {
                         continue;
                     }
@@ -320,7 +327,7 @@ internal class UiTracker
         {
             try
             {
-                if (IsWindowVisible(hwnd) && !IsIconic(hwnd) && !IsWindowCloaked(hwnd))
+                if (IsWindowVisible(hwnd) && !IsIconic(hwnd))
                 {
                     if (Native.GetWindowRect(hwnd, out var rect))
                     {
@@ -330,7 +337,7 @@ internal class UiTracker
                         {
                             windowHandles.Add(hwnd);
 
-                            if (IsTouchKeyboardWindow(hwnd))
+                            if (TabTipManager.IsTouchKeyboardWindow(hwnd))
                             {
                                 GetWindowThreadProcessId(hwnd, out uint pid);
                                 if (pid != 0)
@@ -452,4 +459,40 @@ internal class UiTracker
     {
         return _elements;
     }
+
+
+
+    private static bool IsTypeableElement(AutomationElement el)
+    {
+        if (el == null) return false;
+        try
+        {
+            var controlType = el.ControlType;
+            if (controlType == ControlType.Edit)
+            {
+                return true;
+            }
+            if (controlType == ControlType.ComboBox)
+            {
+                return true;
+            }
+
+            // if (el.Patterns.Value.IsSupported)
+            // {
+            //     try
+            //     {
+            //         if (!el.Patterns.Value.Pattern.IsReadOnly.Value)
+            //         {
+            //             return true;
+            //         }
+            //     }
+            //     catch { }
+            // }
+        }
+        catch { }
+        return false;
+    }
+
+
+
 }

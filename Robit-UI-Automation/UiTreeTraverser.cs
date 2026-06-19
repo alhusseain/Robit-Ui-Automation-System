@@ -37,8 +37,6 @@ internal class UiTreeTraverser
     [DllImport("user32.dll")]
     private static extern bool IsChild(IntPtr hWndParent, IntPtr hWndChild);
 
-    [DllImport("dwmapi.dll")]
-    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out bool pvAttribute, int cbAttribute);
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -49,7 +47,6 @@ internal class UiTreeTraverser
     [DllImport("user32.dll")]
     private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
 
-    private const int DWMWA_CLOAKED = 14;
     private const uint GA_ROOT = 2;
     private const uint GA_ROOTOWNER = 3;
 
@@ -226,23 +223,21 @@ internal class UiTreeTraverser
             if (hwnd != IntPtr.Zero)
             {
                 bool isVisibleSimple = IsWindowVisibleSimple(hwnd);
-                bool isCloaked = IsWindowCloaked(hwnd);
                 bool isCovered = IsWindowCovered(hwnd);
 
                 if (diagnostics != null)
                 {
                     diagnostics.AddLog(0, $"Root Window (HWND: {hwnd.ToInt64():X}, Title: '{UiTracker.GetWindowTitle(hwnd)}')");
                     diagnostics.AddLog(1, $"IsWindowVisibleSimple: {isVisibleSimple}");
-                    diagnostics.AddLog(1, $"IsWindowCloaked: {isCloaked}");
                     diagnostics.AddLog(1, $"IsWindowCovered: {isCovered}");
                 }
 
-                // Prune if window is minimized, hidden, cloaked, or completely covered
-                if (!isVisibleSimple || isCloaked || isCovered)
+                // Prune if window is minimized, hidden, or completely covered
+                if (!isVisibleSimple || isCovered)
                 {
                     if (diagnostics != null)
                     {
-                        diagnostics.AddLog(1, "Root Window pruned: failed visibility/cloak/cover check.");
+                        diagnostics.AddLog(1, "Root Window pruned: failed visibility/cover check.");
                     }
                     return result;
                 }
@@ -615,27 +610,6 @@ internal class UiTreeTraverser
         return true;
     }
 
-    /// <summary>
-    /// Checks if the window is cloaked (e.g., in a suspended state or on a different virtual desktop).
-    /// </summary>
-    private bool IsWindowCloaked(IntPtr hwnd)
-    {
-        if (hwnd == IntPtr.Zero) return false;
-        if (IsTouchKeyboardWindow(hwnd)) return false;
-        try
-        {
-            int hr = DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, out bool isCloaked, Marshal.SizeOf<bool>());
-            if (hr == 0) // S_OK
-            {
-                return isCloaked;
-            }
-        }
-        catch
-        {
-            // If DwmGetWindowAttribute fails or is unsupported
-        }
-        return false;
-    }
 
     /// <summary>
     /// Checks if a window is completely covered by another window.

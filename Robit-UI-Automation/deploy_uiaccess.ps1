@@ -24,21 +24,35 @@ try {
     if (-not $cert) {
         Write-Host "Creating local self-signed code signing certificate..." -ForegroundColor Cyan
         $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $certSubject -CertStoreLocation Cert:\LocalMachine\My
-        
-        # Export and import to Root and Trusted Publisher stores
-        $cerFile = "$workspaceRoot\temp_uiaccess.cer"
-        Export-Certificate -Cert $cert -FilePath $cerFile | Out-Null
-        
-        Write-Host "Installing certificate to Trusted Root Certification Authorities..." -ForegroundColor Cyan
-        Import-Certificate -FilePath $cerFile -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-        
-        Write-Host "Installing certificate to Trusted Publishers..." -ForegroundColor Cyan
-        Import-Certificate -FilePath $cerFile -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
-        
-        Remove-Item $cerFile
-        Write-Host "Certificate generated and trusted successfully." -ForegroundColor Green
+        Write-Host "Certificate generated successfully." -ForegroundColor Green
     } else {
         Write-Host "Using existing code-signing certificate: $certSubject" -ForegroundColor Green
+        # Get-ChildItem can return multiple certificates, pick the first one
+        if ($cert -is [array]) {
+            $cert = $cert[0]
+        }
+    }
+
+    # Ensure certificate is in Trusted Root and Trusted Publisher stores
+    $certInRoot = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+    $certInPublisher = Get-ChildItem Cert:\LocalMachine\TrustedPublisher | Where-Object { $_.Thumbprint -eq $cert.Thumbprint }
+
+    if (-not $certInRoot -or -not $certInPublisher) {
+        Write-Host "Ensuring certificate trust in Root and Trusted Publishers stores..." -ForegroundColor Cyan
+        $cerFile = "$workspaceRoot\temp_uiaccess.cer"
+        Export-Certificate -Cert $cert -FilePath $cerFile | Out-Null
+
+        if (-not $certInRoot) {
+            Write-Host "Installing certificate to Trusted Root Certification Authorities..." -ForegroundColor Cyan
+            Import-Certificate -FilePath $cerFile -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+        }
+        if (-not $certInPublisher) {
+            Write-Host "Installing certificate to Trusted Publishers..." -ForegroundColor Cyan
+            Import-Certificate -FilePath $cerFile -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+        }
+
+        Remove-Item $cerFile
+        Write-Host "Certificate trust updated successfully." -ForegroundColor Green
     }
 
     # 3. Sign the executable

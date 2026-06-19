@@ -31,17 +31,22 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
-        // Parse arguments for diagnostics
+        // Parse arguments for diagnostics or focus-only mode
         bool isDiagnose = false;
         string? filterName = null;
         IntPtr filterHwnd = IntPtr.Zero;
         int filterPid = -1;
         bool listOnly = false;
+        bool focusOnly = false;
 
         for (int i = 0; i < args.Length; i++)
         {
             var arg = args[i].ToLowerInvariant();
-            if (arg == "--diagnose" || arg == "diagnose")
+            if (arg == "--focus-only" || arg == "--only-focus")
+            {
+                focusOnly = true;
+            }
+            else if (arg == "--diagnose" || arg == "diagnose")
             {
                 isDiagnose = true;
             }
@@ -98,9 +103,9 @@ static class Program
             return;
         }
 
-        settings = AppSettings.Load();
+        settings = AppSettings.Load(focusOnly);
 
-        if (settings.InputMode == "io")
+        if (settings.InputMode == "io" && !focusOnly)
         {
             Console.SetOut(new FilteredTextWriter(Console.Out));
         }
@@ -108,7 +113,7 @@ static class Program
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
-        tracker = new UiTracker(settings.MeasureRefresh, settings.MeasureVisibility, settings.InputMode == "test");
+        tracker = new UiTracker(settings.MeasureRefresh, settings.MeasureVisibility, settings.InputMode == "test", focusOnly);
         overlay = new OverlayForm();
 
         tracker.AttachOverlay(overlay);
@@ -116,18 +121,21 @@ static class Program
 
         getClosestMetrics = new CustomMetrics("GetClosest");
 
-        Console.WriteLine($"Input mode: {settings.InputMode}");
-        Console.WriteLine($"GetClosest timing enabled: {settings.MeasureGetClosest}");
-        Console.WriteLine($"Refresh tracing enabled: {settings.MeasureRefresh}");
-        Console.WriteLine($"Visibility tracing enabled: {settings.MeasureVisibility}");
+        if (!focusOnly)
+        {
+            Console.WriteLine($"Input mode: {settings.InputMode}");
+            Console.WriteLine($"GetClosest timing enabled: {settings.MeasureGetClosest}");
+            Console.WriteLine($"Refresh tracing enabled: {settings.MeasureRefresh}");
+            Console.WriteLine($"Visibility tracing enabled: {settings.MeasureVisibility}");
+        }
 
         if (settings.InputMode == "test")
         {
-            SetupTestMode();
+            SetupTestMode(focusOnly);
         }
         else
         {
-            Task.Run(StartStandardIOServer);
+            Task.Run(() => StartStandardIOServer(focusOnly));
         }
 
         Application.Run();
@@ -278,9 +286,11 @@ static class Program
         }
     }
 
-    static void SetupTestMode()
+    static void SetupTestMode(bool focusOnly = false)
     {
         tracker.SafeRefresh();
+        if (focusOnly) return;
+
         globalHook = Hook.GlobalEvents();
 
         globalHook.MouseDownExt += (_, e) =>
@@ -310,13 +320,20 @@ static class Program
         };
 
         Application.ApplicationExit += (_, __) => globalHook?.Dispose();
-        Console.WriteLine("Test mode active: left click shows closest, 1-6 invokes, Esc clears");
+        if (!focusOnly)
+        {
+            Console.WriteLine("Test mode active: left click shows closest, 1-6 invokes, Esc clears");
+        }
     }
 
-    static void StartStandardIOServer()
+    static void StartStandardIOServer(bool focusOnly = false)
     {
         tracker.SafeRefresh();
-        Console.WriteLine("Standard I/O server running. Ready for commands.");
+        if (!focusOnly)
+        {
+            Console.WriteLine("Standard I/O server running. Ready for commands.");
+        }
+        if (focusOnly) return;
 
         while (true)
         {
@@ -449,7 +466,6 @@ static class Program
                 try
                 {
                     ShowWindow(item.Hwnd, SW_RESTORE);
-                    SetForegroundWindow(item.Hwnd);
                     System.Threading.Thread.Sleep(150);
                 }
                 catch (Exception ex)
@@ -900,9 +916,6 @@ static class Program
     static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
-    static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
     static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
     const int SW_RESTORE = 9;
@@ -924,9 +937,9 @@ static class Program
         public bool MeasureRefresh { get; private set; } = true;
         public bool MeasureVisibility { get; private set; } = true;
 
-        public static AppSettings Load()
+        public static AppSettings Load(bool focusOnly = false)
         {
-            var values = LoadDotEnv();
+            var values = LoadDotEnv(focusOnly);
             return new AppSettings
             {
                 InputMode = NormalizeMode(GetValue(values, "INPUT_MODE", "io")),
@@ -936,14 +949,17 @@ static class Program
             };
         }
 
-        static Dictionary<string, string> LoadDotEnv()
+        static Dictionary<string, string> LoadDotEnv(bool focusOnly = false)
         {
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string envPath = FindEnvFile();
 
             if (envPath == null)
             {
-                Console.WriteLine("No .env file found. Using defaults.");
+                if (!focusOnly)
+                {
+                    Console.WriteLine("No .env file found. Using defaults.");
+                }
                 return values;
             }
 
@@ -966,7 +982,10 @@ static class Program
                 values[key] = value;
             }
 
-            Console.WriteLine($".env loaded from {envPath}");
+            if (!focusOnly)
+            {
+                Console.WriteLine($".env loaded from {envPath}");
+            }
             return values;
         }
 
